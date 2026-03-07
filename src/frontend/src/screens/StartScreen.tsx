@@ -384,25 +384,6 @@ export function StartScreen({ onStart }: StartScreenProps) {
           </div>
         </motion.div>
       </motion.div>
-
-      {/* Footer */}
-      <motion.footer
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 1.2 }}
-        className="absolute bottom-4 text-center text-xs opacity-30 z-10"
-        style={{ fontFamily: "'Sora', sans-serif" }}
-      >
-        © {new Date().getFullYear()}. Built with love using{" "}
-        <a
-          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:opacity-80"
-        >
-          caffeine.ai
-        </a>
-      </motion.footer>
     </div>
   );
 }

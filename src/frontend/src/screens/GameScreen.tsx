@@ -3,18 +3,26 @@ import {
   INVINCIBILITY_DURATION,
   LEVELS,
   MAX_LIVES,
+  POWERUP_BONUS_SCORE,
+  POWERUP_HEART_CHANCE,
   SCORE_PER_METEOR,
   SMOOTHING_ALPHA,
   getLevelForScore,
+  getPowerUpSpawnInterval,
 } from "@/game/constants";
 import {
   checkCollision,
+  checkPowerUpCollision,
   createMeteor,
+  createPowerUp,
   drawHUD,
   drawMeteor,
   drawPlayerBadge,
+  drawPowerUp,
   isMeteorOffScreen,
+  isPowerUpOffScreen,
   updateMeteor,
+  updatePowerUp,
 } from "@/game/meteorUtils";
 import type {
   BodyCenter,
@@ -22,6 +30,7 @@ import type {
   MediaPipePose,
   Meteor,
   PoseResults,
+  PowerUp,
 } from "@/game/types";
 import { Pause, Play } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -33,6 +42,8 @@ interface ScorePopup {
   id: number;
   x: number;
   y: number;
+  value: number;
+  type: "score" | "coin" | "heart";
   timestamp: number;
 }
 
@@ -70,8 +81,12 @@ export function GameScreen({
   const isHitRef = useRef(false);
   const hitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spawnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const powerUpSpawnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const isPausedRef = useRef(false);
   const gameActiveRef = useRef(true);
+  const powerUpsRef = useRef<PowerUp[]>([]);
 
   // React state (for UI rendering)
   const [_score, setScore] = useState(initialScore);
@@ -88,16 +103,24 @@ export function GameScreen({
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
 
   // Score popup helper
-  const addScorePopup = useCallback((x: number, y: number) => {
-    const id = Date.now() + Math.random();
-    setScorePopups((prev) => [
-      ...prev.slice(-8),
-      { id, x, y, timestamp: Date.now() },
-    ]);
-    setTimeout(() => {
-      setScorePopups((prev) => prev.filter((p) => p.id !== id));
-    }, 1100);
-  }, []);
+  const addScorePopup = useCallback(
+    (
+      x: number,
+      y: number,
+      value: number,
+      type: "score" | "coin" | "heart" = "score",
+    ) => {
+      const id = Date.now() + Math.random();
+      setScorePopups((prev) => [
+        ...prev.slice(-8),
+        { id, x, y, value, type, timestamp: Date.now() },
+      ]);
+      setTimeout(() => {
+        setScorePopups((prev) => prev.filter((p) => p.id !== id));
+      }, 1200);
+    },
+    [],
+  );
 
   // ===================== MEDIAPIPE SETUP =====================
   const initMediaPipe = useCallback(async () => {
@@ -252,6 +275,29 @@ export function GameScreen({
     }, levelCfg.spawnMs);
   }, []);
 
+  // ===================== POWER-UP SPAWN =====================
+  const schedulePowerUpSpawn = useCallback(() => {
+    if (powerUpSpawnTimerRef.current) {
+      clearTimeout(powerUpSpawnTimerRef.current);
+    }
+    if (!gameActiveRef.current || isPausedRef.current) return;
+
+    const interval = getPowerUpSpawnInterval(levelRef.current);
+
+    powerUpSpawnTimerRef.current = setTimeout(() => {
+      if (!gameActiveRef.current || isPausedRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const type: "heart" | "coin" =
+        Math.random() < POWERUP_HEART_CHANCE ? "heart" : "coin";
+      const newPowerUp = createPowerUp(canvas.width, type);
+      powerUpsRef.current = [...powerUpsRef.current, newPowerUp];
+
+      schedulePowerUpSpawn();
+    }, interval);
+  }, []);
+
   // ===================== GAME LOOP =====================
   const gameLoop = useCallback(() => {
     if (!gameActiveRef.current) return;
@@ -300,7 +346,7 @@ export function GameScreen({
         }
 
         // Score popup at bottom of screen
-        addScorePopup(updated.x, canvas.height - 40);
+        addScorePopup(updated.x, canvas.height - 40, SCORE_PER_METEOR, "score");
         continue; // remove meteor
       }
 
@@ -316,6 +362,36 @@ export function GameScreen({
     }
 
     meteorsRef.current = updatedMeteors;
+
+    // --- Update power-ups ---
+    const updatedPowerUps: PowerUp[] = [];
+    for (const pu of powerUpsRef.current) {
+      const updated = updatePowerUp(pu);
+
+      // Off screen -- just remove
+      if (isPowerUpOffScreen(updated, canvas.height)) {
+        continue;
+      }
+
+      // Player collision -- pick up
+      if (bodyCenter && checkPowerUpCollision(updated, bodyCenter)) {
+        if (updated.type === "heart") {
+          const newLives = Math.min(livesRef.current + 1, MAX_LIVES);
+          livesRef.current = newLives;
+          setLives(newLives);
+          addScorePopup(updated.x, updated.y, 1, "heart");
+        } else {
+          const bonus = POWERUP_BONUS_SCORE;
+          scoreGained += bonus;
+          addScorePopup(updated.x, updated.y, bonus, "coin");
+        }
+        getAudioEngine().playLevelUpSound(); // reuse for pickup feedback
+        continue; // remove collected power-up
+      }
+
+      updatedPowerUps.push(updated);
+    }
+    powerUpsRef.current = updatedPowerUps;
 
     // Handle score gain
     if (scoreGained > 0) {
@@ -377,6 +453,11 @@ export function GameScreen({
       drawMeteor(ctx, meteor);
     }
 
+    // Draw power-ups
+    for (const pu of powerUpsRef.current) {
+      drawPowerUp(ctx, pu);
+    }
+
     // Draw player badge
     if (bodyCenter) {
       drawPlayerBadge(
@@ -422,6 +503,7 @@ export function GameScreen({
     livesRef.current = initialLives;
     levelRef.current = initialLevel;
     meteorsRef.current = [];
+    powerUpsRef.current = [];
 
     // Set canvas size
     handleResize();
@@ -436,6 +518,7 @@ export function GameScreen({
         getAudioEngine().startBackgroundMusic();
         gameLoop();
         scheduleSpawn();
+        schedulePowerUpSpawn();
       }
     }, 500);
 
@@ -451,6 +534,10 @@ export function GameScreen({
       if (spawnTimerRef.current) {
         clearTimeout(spawnTimerRef.current);
         spawnTimerRef.current = null;
+      }
+      if (powerUpSpawnTimerRef.current) {
+        clearTimeout(powerUpSpawnTimerRef.current);
+        powerUpSpawnTimerRef.current = null;
       }
       if (invincibleTimerRef.current) {
         clearTimeout(invincibleTimerRef.current);
@@ -494,9 +581,13 @@ export function GameScreen({
       if (spawnTimerRef.current) {
         clearTimeout(spawnTimerRef.current);
       }
+      if (powerUpSpawnTimerRef.current) {
+        clearTimeout(powerUpSpawnTimerRef.current);
+      }
     } else {
       getAudioEngine().startBackgroundMusic();
       scheduleSpawn();
+      schedulePowerUpSpawn();
     }
   }
 
@@ -505,6 +596,11 @@ export function GameScreen({
     setShowLevelUp(false);
     gameActiveRef.current = true;
     meteorsRef.current = [];
+    powerUpsRef.current = [];
+
+    // Reset lives to full on each new level
+    livesRef.current = MAX_LIVES;
+    setLives(MAX_LIVES);
 
     // Resume game loop
     if (animFrameRef.current !== null) {
@@ -512,6 +608,7 @@ export function GameScreen({
     }
     gameLoop();
     scheduleSpawn();
+    schedulePowerUpSpawn();
     getAudioEngine().startBackgroundMusic();
   }
 
@@ -540,9 +637,30 @@ export function GameScreen({
         <div
           key={popup.id}
           className="score-popup"
-          style={{ left: popup.x, top: popup.y - 50 }}
+          style={{
+            left: popup.x,
+            top: popup.y - 50,
+            color:
+              popup.type === "heart"
+                ? "#FF4444"
+                : popup.type === "coin"
+                  ? "#FFD700"
+                  : "oklch(0.78 0.22 195)",
+            fontSize: popup.type !== "score" ? "18px" : undefined,
+            fontWeight: "bold",
+            textShadow:
+              popup.type === "heart"
+                ? "0 0 10px #FF4444"
+                : popup.type === "coin"
+                  ? "0 0 10px #FFD700"
+                  : undefined,
+          }}
         >
-          +{SCORE_PER_METEOR}
+          {popup.type === "heart"
+            ? "+1 ♥"
+            : popup.type === "coin"
+              ? `+${popup.value} BONUS`
+              : `+${popup.value}`}
         </div>
       ))}
 

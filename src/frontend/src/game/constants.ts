@@ -104,6 +104,29 @@ export const STORAGE_KEYS = {
 
 export const SMOOTHING_ALPHA = 0.4;
 
+export const POWERUP_BONUS_SCORE = 25;
+export const POWERUP_HEART_CHANCE = 0.4; // 40% kalp, 60% coin
+
+/**
+ * Bölüme göre power-up spawn aralığı (ms) -- zorluk arttıkça seyrekleşir
+ * Bölüm 1-3: 8000-10000ms
+ * Bölüm 4-6: 12000-15000ms
+ * Bölüm 7-9: 18000-22000ms
+ * Bölüm 10: 28000-35000ms
+ */
+export function getPowerUpSpawnInterval(level: number): number {
+  if (level <= 3) {
+    return 8000 + Math.random() * 2000; // 8-10s
+  }
+  if (level <= 6) {
+    return 12000 + Math.random() * 3000; // 12-15s
+  }
+  if (level <= 9) {
+    return 18000 + Math.random() * 4000; // 18-22s
+  }
+  return 28000 + Math.random() * 7000; // 28-35s
+}
+
 export function getLevelForScore(score: number): LevelConfig {
   let currentLevel = LEVELS[0];
   for (const level of LEVELS) {

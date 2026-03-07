@@ -53,7 +53,21 @@ export interface ScorePopup {
   x: number;
   y: number;
   value: number;
+  type: "score" | "coin" | "heart";
   timestamp: number;
+}
+
+// Power-up object
+export interface PowerUp {
+  id: number;
+  x: number;
+  y: number;
+  vy: number;
+  radius: number;
+  type: "heart" | "coin";
+  rotation: number;
+  rotationSpeed: number;
+  pulsePhase: number;
 }
 
 // MediaPipe global declarations

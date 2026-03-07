@@ -35,6 +35,8 @@ export class AudioEngine {
   startBackgroundMusic(): void {
     if (this.bgPlaying) return;
     this.bgPlaying = true;
+    // Ensure AudioContext is running before scheduling nodes
+    this.getCtx();
 
     const BPM = 140;
     const BEAT_MS = (60 / BPM) * 1000;
@@ -129,6 +131,10 @@ export class AudioEngine {
     if (this.bgInterval !== null) {
       clearInterval(this.bgInterval);
       this.bgInterval = null;
+    }
+    // Suspend the AudioContext so no scheduled nodes produce sound
+    if (this.ctx && this.ctx.state === "running") {
+      this.ctx.suspend();
     }
   }
 

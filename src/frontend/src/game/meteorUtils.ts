@@ -1,5 +1,5 @@
 import { METEOR_COLOR_SETS, PLAYER_HITBOX_RADIUS } from "./constants";
-import type { Meteor } from "./types";
+import type { Meteor, PowerUp } from "./types";
 
 let meteorIdCounter = 0;
 
@@ -175,6 +175,188 @@ export function drawMeteor(
     Math.PI * 2,
   );
   ctx.fill();
+
+  ctx.restore();
+}
+
+// ===================== POWER-UP UTILS =====================
+
+let powerUpIdCounter = 0;
+
+/**
+ * Create a new power-up spawning at the top of the canvas
+ */
+export function createPowerUp(
+  canvasWidth: number,
+  type: "heart" | "coin",
+): PowerUp {
+  const id = ++powerUpIdCounter;
+  const radius = type === "heart" ? 28 : 22;
+  const x = radius + Math.random() * (canvasWidth - radius * 2);
+  const y = -radius - 10;
+  const vy = 2.5 + Math.random() * 1.5; // slower than meteors
+
+  return {
+    id,
+    x,
+    y,
+    vy,
+    radius,
+    type,
+    rotation: 0,
+    rotationSpeed: type === "coin" ? 0.03 : 0,
+    pulsePhase: Math.random() * Math.PI * 2,
+  };
+}
+
+/**
+ * Update power-up position
+ */
+export function updatePowerUp(powerUp: PowerUp): PowerUp {
+  return {
+    ...powerUp,
+    x: powerUp.x,
+    y: powerUp.y + powerUp.vy,
+    rotation: powerUp.rotation + powerUp.rotationSpeed,
+    pulsePhase: powerUp.pulsePhase + 0.05,
+  };
+}
+
+/**
+ * Check if power-up is off screen
+ */
+export function isPowerUpOffScreen(
+  powerUp: PowerUp,
+  canvasHeight: number,
+): boolean {
+  return powerUp.y > canvasHeight + powerUp.radius + 10;
+}
+
+/**
+ * Check collision between power-up and player body center
+ */
+export function checkPowerUpCollision(
+  powerUp: PowerUp,
+  bodyCenter: { x: number; y: number },
+): boolean {
+  const dx = powerUp.x - bodyCenter.x;
+  const dy = powerUp.y - bodyCenter.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  return distance < powerUp.radius + PLAYER_HITBOX_RADIUS;
+}
+
+/**
+ * Draw a power-up on canvas
+ */
+export function drawPowerUp(
+  ctx: CanvasRenderingContext2D,
+  powerUp: PowerUp,
+): void {
+  ctx.save();
+  ctx.translate(powerUp.x, powerUp.y);
+
+  const pulse = 1 + Math.sin(powerUp.pulsePhase) * 0.08;
+
+  if (powerUp.type === "heart") {
+    // Kırmızı kalp
+    ctx.scale(pulse, pulse);
+    const r = powerUp.radius;
+
+    // Outer glow
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = "rgba(255, 60, 60, 0.8)";
+
+    // Heart shape using bezier curves
+    ctx.beginPath();
+    const s = r * 0.055;
+    ctx.moveTo(0, r * 0.3);
+    ctx.bezierCurveTo(
+      -r * 0.6 * s * 10,
+      r * 0.05 * s * 10,
+      -r * 1.0,
+      -r * 0.4,
+      0,
+      -r * 0.7,
+    );
+    ctx.bezierCurveTo(
+      r * 1.0,
+      -r * 0.4,
+      r * 0.6 * s * 10,
+      r * 0.05 * s * 10,
+      0,
+      r * 0.3,
+    );
+    ctx.closePath();
+
+    const heartGrad = ctx.createRadialGradient(-r * 0.2, -r * 0.3, 0, 0, 0, r);
+    heartGrad.addColorStop(0, "#FF8080");
+    heartGrad.addColorStop(0.5, "#FF2222");
+    heartGrad.addColorStop(1, "#CC0000");
+    ctx.fillStyle = heartGrad;
+    ctx.fill();
+    ctx.strokeStyle = "#FF6666";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // White specular
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.25, -r * 0.4, r * 0.18, r * 0.12, -0.4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.fill();
+  } else {
+    // Altın coin
+    ctx.rotate(powerUp.rotation);
+    ctx.scale(pulse, pulse);
+    const r = powerUp.radius;
+
+    // Outer glow
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = "rgba(255, 215, 0, 0.9)";
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    const coinGrad = ctx.createRadialGradient(
+      -r * 0.2,
+      -r * 0.25,
+      r * 0.05,
+      0,
+      0,
+      r,
+    );
+    coinGrad.addColorStop(0, "#FFF200");
+    coinGrad.addColorStop(0.4, "#FFD700");
+    coinGrad.addColorStop(0.75, "#FFA500");
+    coinGrad.addColorStop(1, "#CC7700");
+    ctx.fillStyle = coinGrad;
+    ctx.fill();
+
+    ctx.strokeStyle = "#FFE066";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Inner circle
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.65, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255, 240, 100, 0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // "$" text inside coin
+    ctx.font = `bold ${r * 0.9}px "Orbitron", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(180, 100, 0, 0.8)";
+    ctx.fillText("$", 0, 1);
+
+    // Specular
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.2, -r * 0.28, r * 0.22, r * 0.14, -0.4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.fill();
+  }
 
   ctx.restore();
 }
