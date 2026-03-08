@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { createContext, createElement, useContext, useState } from "react";
+import type { ReactNode } from "react";
 
 export type LanguageCode =
   | "tr"
@@ -38,7 +39,7 @@ const translations: Translations = {
   tr: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "GÖVDE HAREKETİYLE METEORları DODGE ET",
+    "start.subtitle": "DÜŞEN METEORLARDAN KAÇ!",
     "start.highscore_label": "EN YÜKSEK SKOR",
     "start.name_label": "OYUNCU İSMİ",
     "start.name_placeholder": "İsminizi girin...",
@@ -118,7 +119,8 @@ const translations: Translations = {
     "game.paused": "DURAKLATILDI",
     "hud.score": "SKOR",
     "hud.level": "BÖLÜM",
-    "start.framing_tip": "Kameradan 1-2 metre uzakta dur, tüm gövden görünsün",
+    "start.framing_tip":
+      "Kameranın karşısında dur. Meteorlar yukarıdan düşer -- gövdeni sağa sola hareket ettirerek kaç. Kalpleri topla, can kazan. Bölümler ilerledikçe meteorlar hızlanır ve çoğalır.",
     "start.bestlevel_label": "EN İYİ BÖLÜM",
     "legend.title": "EFSANE!",
     "legend.subtitle": "TÜM 50 BÖLÜMÜ TAMAMLADIN",
@@ -138,11 +140,17 @@ const translations: Translations = {
     "game.touch_hint":
       "Parmağınızı gövdenizi taklit etmek için hareket ettirin",
     "game.touch_mode": "DOKUNMATIK MOD",
+    "theme.label": "TEMA SEÇ",
+    "theme.space": "Uzay Fırtınası",
+    "theme.neon": "Neon Arcade",
+    "theme.volcanic": "Volkanik Kıyamet",
+    "theme.ice": "Buz Fırtınası",
+    "theme.gold": "Altın Çağ",
   },
   en: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "DODGE METEORS WITH YOUR BODY",
+    "start.subtitle": "ESCAPE THE FALLING METEORS!",
     "start.highscore_label": "HIGH SCORE",
     "start.name_label": "PLAYER NAME",
     "start.name_placeholder": "Enter your name...",
@@ -223,7 +231,7 @@ const translations: Translations = {
     "hud.score": "SCORE",
     "hud.level": "LEVEL",
     "start.framing_tip":
-      "Stand 1-2 meters from the camera so your full torso is visible",
+      "Face the camera. Meteors fall from above -- dodge them by moving your body. Collect hearts to gain lives. Each level gets faster and deadlier.",
     "start.bestlevel_label": "BEST LEVEL",
     "legend.title": "LEGENDARY!",
     "legend.subtitle": "YOU COMPLETED ALL 50 LEVELS",
@@ -242,11 +250,17 @@ const translations: Translations = {
     "game.pause.sound_off": "SOUND OFF",
     "game.touch_hint": "Move your finger to control your body position",
     "game.touch_mode": "TOUCH MODE",
+    "theme.label": "CHOOSE THEME",
+    "theme.space": "Space Storm",
+    "theme.neon": "Neon Arcade",
+    "theme.volcanic": "Volcanic Doom",
+    "theme.ice": "Ice Storm",
+    "theme.gold": "Golden Age",
   },
   de: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "WEICHE METEOREN MIT DEINEM KÖRPER AUS",
+    "start.subtitle": "WEICH DEN FALLENDEN METEOREN AUS!",
     "start.highscore_label": "HÖCHSTPUNKTZAHL",
     "start.name_label": "SPIELERNAME",
     "start.name_placeholder": "Namen eingeben...",
@@ -327,7 +341,7 @@ const translations: Translations = {
     "hud.score": "PUNKTE",
     "hud.level": "LEVEL",
     "start.framing_tip":
-      "Steh 1-2 Meter von der Kamera entfernt, so dass dein Oberkörper sichtbar ist",
+      "Stell dich vor die Kamera. Meteore fallen von oben -- weiche ihnen aus, indem du deinen Körper bewegst. Sammle Herzen für Leben. Jedes Level wird schneller und gefährlicher.",
     "start.bestlevel_label": "BESTES LEVEL",
     "legend.title": "LEGENDÄR!",
     "legend.subtitle": "DU HAST ALLE 50 LEVEL ABGESCHLOSSEN",
@@ -346,11 +360,17 @@ const translations: Translations = {
     "game.pause.sound_off": "TON AUS",
     "game.touch_hint": "Finger bewegen um die Körperposition zu steuern",
     "game.touch_mode": "TOUCH-MODUS",
+    "theme.label": "THEMA WÄHLEN",
+    "theme.space": "Weltraumsturm",
+    "theme.neon": "Neon Arcade",
+    "theme.volcanic": "Vulkanisches Chaos",
+    "theme.ice": "Eissturm",
+    "theme.gold": "Goldenes Zeitalter",
   },
   es: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "ESQUIVA METEOROS CON TU CUERPO",
+    "start.subtitle": "¡ESCAPA DE LOS METEOROS QUE CAEN!",
     "start.highscore_label": "MÁXIMA PUNTUACIÓN",
     "start.name_label": "NOMBRE DEL JUGADOR",
     "start.name_placeholder": "Ingresa tu nombre...",
@@ -431,7 +451,7 @@ const translations: Translations = {
     "hud.score": "PUNTOS",
     "hud.level": "NIVEL",
     "start.framing_tip":
-      "Colócate a 1-2 metros de la cámara para que tu torso sea visible",
+      "Párate frente a la cámara. Los meteoros caen desde arriba -- esquívalos moviendo tu cuerpo. Recoge corazones para ganar vidas. Cada nivel es más rápido y mortal.",
     "start.bestlevel_label": "MEJOR NIVEL",
     "legend.title": "¡LEGENDARIO!",
     "legend.subtitle": "COMPLETASTE LOS 50 NIVELES",
@@ -450,11 +470,17 @@ const translations: Translations = {
     "game.pause.sound_off": "SONIDO DES.",
     "game.touch_hint": "Mueve el dedo para controlar tu posición",
     "game.touch_mode": "MODO TÁCTIL",
+    "theme.label": "ELEGIR TEMA",
+    "theme.space": "Tormenta Espacial",
+    "theme.neon": "Neon Arcade",
+    "theme.volcanic": "Caos Volcánico",
+    "theme.ice": "Tormenta de Hielo",
+    "theme.gold": "Edad Dorada",
   },
   fr: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "ESQUIVEZ LES MÉTÉORES AVEC VOTRE CORPS",
+    "start.subtitle": "FUYEZ LES MÉTÉORES QUI TOMBENT!",
     "start.highscore_label": "MEILLEUR SCORE",
     "start.name_label": "NOM DU JOUEUR",
     "start.name_placeholder": "Entrez votre nom...",
@@ -535,7 +561,7 @@ const translations: Translations = {
     "hud.score": "SCORE",
     "hud.level": "NIVEAU",
     "start.framing_tip":
-      "Placez-vous à 1-2 mètres de la caméra pour que votre torse soit visible",
+      "Placez-vous face à la caméra. Les météores tombent d'en haut -- esquivez-les en bougeant votre corps. Collectez des cœurs pour gagner des vies. Chaque niveau devient plus rapide et plus mortel.",
     "start.bestlevel_label": "MEILLEUR NIVEAU",
     "legend.title": "LÉGENDAIRE!",
     "legend.subtitle": "VOUS AVEZ COMPLÉTÉ LES 50 NIVEAUX",
@@ -555,11 +581,17 @@ const translations: Translations = {
     "game.pause.sound_off": "SON DÉSACT.",
     "game.touch_hint": "Déplacez le doigt pour contrôler votre position",
     "game.touch_mode": "MODE TACTILE",
+    "theme.label": "CHOISIR THÈME",
+    "theme.space": "Tempête Spatiale",
+    "theme.neon": "Neon Arcade",
+    "theme.volcanic": "Chaos Volcanique",
+    "theme.ice": "Tempête de Glace",
+    "theme.gold": "Âge d'Or",
   },
   hi: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "अपने शरीर से उल्काओं को चकमा दें",
+    "start.subtitle": "गिरते उल्काओं से बचो!",
     "start.highscore_label": "उच्चतम स्कोर",
     "start.name_label": "खिलाड़ी का नाम",
     "start.name_placeholder": "अपना नाम दर्ज करें...",
@@ -639,7 +671,8 @@ const translations: Translations = {
     "game.paused": "रोका गया",
     "hud.score": "स्कोर",
     "hud.level": "स्तर",
-    "start.framing_tip": "कैमरे से 1-2 मीटर दूर खड़े हों ताकि आपका पूरा धड़ दिखे",
+    "start.framing_tip":
+      "कैमरे के सामने खड़े हों। उल्काएं ऊपर से गिरती हैं -- अपना शरीर हिलाकर बचें। दिल उठाएं और जीवन पाएं। हर स्तर तेज़ और घातक होता जाता है।",
     "start.bestlevel_label": "सर्वश्रेष्ठ स्तर",
     "legend.title": "महान!",
     "legend.subtitle": "आपने सभी 50 स्तर पूरे किए",
@@ -658,11 +691,17 @@ const translations: Translations = {
     "game.pause.sound_off": "आवाज़ बंद",
     "game.touch_hint": "अपनी स्थिति नियंत्रित करने के लिए उंगली हिलाएं",
     "game.touch_mode": "टच मोड",
+    "theme.label": "थीम चुनें",
+    "theme.space": "अंतरिक्ष तूफान",
+    "theme.neon": "नियॉन आर्केड",
+    "theme.volcanic": "ज्वालामुखी तबाही",
+    "theme.ice": "बर्फ तूफान",
+    "theme.gold": "स्वर्ण युग",
   },
   zh: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "用身体躲避陨石",
+    "start.subtitle": "躲避坠落的陨石！",
     "start.highscore_label": "最高分",
     "start.name_label": "玩家姓名",
     "start.name_placeholder": "输入您的姓名...",
@@ -741,7 +780,8 @@ const translations: Translations = {
     "game.paused": "已暂停",
     "hud.score": "分数",
     "hud.level": "关卡",
-    "start.framing_tip": "距摄像头1-2米站立，使您的整个上半身可见",
+    "start.framing_tip":
+      "站在摄像头前。陨石从上方坠落 -- 移动身体来躲避。收集爱心获得生命。每一关都更快更致命。",
     "start.bestlevel_label": "最佳关卡",
     "legend.title": "传奇！",
     "legend.subtitle": "您完成了全部50关",
@@ -760,11 +800,17 @@ const translations: Translations = {
     "game.pause.sound_off": "声音关",
     "game.touch_hint": "移动手指来控制您的位置",
     "game.touch_mode": "触控模式",
+    "theme.label": "选择主题",
+    "theme.space": "太空风暴",
+    "theme.neon": "霓虹街机",
+    "theme.volcanic": "火山末日",
+    "theme.ice": "冰霜风暴",
+    "theme.gold": "黄金时代",
   },
   ru: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "УКЛОНЯЙТЕСЬ ОТ МЕТЕОРОВ ТЕЛОМ",
+    "start.subtitle": "УБЕГАЙ ОТ ПАДАЮЩИХ МЕТЕОРОВ!",
     "start.highscore_label": "РЕКОРД",
     "start.name_label": "ИМЯ ИГРОКА",
     "start.name_placeholder": "Введите имя...",
@@ -845,7 +891,7 @@ const translations: Translations = {
     "hud.score": "СЧЁТ",
     "hud.level": "УР.",
     "start.framing_tip":
-      "Встаньте в 1-2 метрах от камеры, чтобы был виден весь торс",
+      "Встаньте перед камерой. Метеоры падают сверху -- уклоняйтесь, двигая телом. Собирайте сердца для жизней. Каждый уровень становится быстрее и смертоноснее.",
     "start.bestlevel_label": "ЛУЧШИЙ УРОВЕНЬ",
     "legend.title": "ЛЕГЕНДАРНО!",
     "legend.subtitle": "ВЫ ПРОШЛИ ВСЕ 50 УРОВНЕЙ",
@@ -864,11 +910,17 @@ const translations: Translations = {
     "game.pause.sound_off": "ЗВУК ВЫКЛ",
     "game.touch_hint": "Перемещайте палец для управления позицией",
     "game.touch_mode": "ТАЧСКРИН",
+    "theme.label": "ВЫБОР ТЕМЫ",
+    "theme.space": "Космический Шторм",
+    "theme.neon": "Неон Аркада",
+    "theme.volcanic": "Вулканический Хаос",
+    "theme.ice": "Ледяной Шторм",
+    "theme.gold": "Золотой Век",
   },
   pt: {
     "start.title1": "METEOR",
     "start.title2": "ESCAPE",
-    "start.subtitle": "DESVIE DOS METEOROS COM SEU CORPO",
+    "start.subtitle": "FUJA DOS METEOROS QUE CAEM!",
     "start.highscore_label": "MAIOR PONTUAÇÃO",
     "start.name_label": "NOME DO JOGADOR",
     "start.name_placeholder": "Digite seu nome...",
@@ -949,7 +1001,7 @@ const translations: Translations = {
     "hud.score": "PONTOS",
     "hud.level": "NÍVEL",
     "start.framing_tip":
-      "Fique a 1-2 metros da câmera para que seu torso inteiro fique visível",
+      "Fique na frente da câmera. Meteoros caem de cima -- desvie movendo seu corpo. Colete corações para ganhar vidas. Cada nível fica mais rápido e letal.",
     "start.bestlevel_label": "MELHOR NÍVEL",
     "legend.title": "LENDÁRIO!",
     "legend.subtitle": "VOCÊ COMPLETOU TODOS OS 50 NÍVEIS",
@@ -968,6 +1020,12 @@ const translations: Translations = {
     "game.pause.sound_off": "SOM DESLIG.",
     "game.touch_hint": "Mova o dedo para controlar sua posição",
     "game.touch_mode": "MODO TOQUE",
+    "theme.label": "ESCOLHER TEMA",
+    "theme.space": "Tempestade Espacial",
+    "theme.neon": "Neon Arcade",
+    "theme.volcanic": "Caos Vulcânico",
+    "theme.ice": "Tempestade de Gelo",
+    "theme.gold": "Era Dourada",
   },
 };
 
@@ -995,13 +1053,16 @@ function getStoredLang(): LanguageCode {
   return "tr";
 }
 
-/**
- * React hook for reading/writing the active language
- */
-export function useLanguage(): {
+// ===================== Context =====================
+
+interface LanguageContextValue {
   lang: LanguageCode;
   setLang: (lang: LanguageCode) => void;
-} {
+}
+
+const LanguageContext = createContext<LanguageContextValue | null>(null);
+
+export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<LanguageCode>(getStoredLang);
 
   function setLang(newLang: LanguageCode) {
@@ -1013,5 +1074,19 @@ export function useLanguage(): {
     setLangState(newLang);
   }
 
-  return { lang, setLang };
+  return createElement(
+    LanguageContext.Provider,
+    { value: { lang, setLang } },
+    children,
+  );
+}
+
+/**
+ * React hook for reading/writing the active language.
+ * Must be used inside LanguageProvider.
+ */
+export function useLanguage(): LanguageContextValue {
+  const ctx = useContext(LanguageContext);
+  if (!ctx) throw new Error("useLanguage must be used inside LanguageProvider");
+  return ctx;
 }

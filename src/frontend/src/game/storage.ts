@@ -1,4 +1,27 @@
 import { STORAGE_KEYS } from "./constants";
+import type { ThemeId } from "./themes";
+
+const THEME_KEY = "meteorescape_theme";
+
+export function getStoredTheme(): ThemeId {
+  try {
+    const val = localStorage.getItem(THEME_KEY);
+    if (val && ["space", "neon", "volcanic", "ice", "gold"].includes(val)) {
+      return val as ThemeId;
+    }
+  } catch {
+    // ignore
+  }
+  return "space";
+}
+
+export function saveTheme(id: ThemeId): void {
+  try {
+    localStorage.setItem(THEME_KEY, id);
+  } catch {
+    // ignore
+  }
+}
 
 export const STORAGE_KEY_BEST_LEVEL = "meteorescape_bestlevel";
 

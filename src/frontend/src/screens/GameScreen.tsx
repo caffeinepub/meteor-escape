@@ -26,6 +26,8 @@ import {
   updateMeteor,
   updatePowerUp,
 } from "@/game/meteorUtils";
+import { useTheme } from "@/game/themeContext";
+import { getThemeConfig } from "@/game/themes";
 import type {
   BodyCenter,
   MediaPipeCamera,
@@ -67,8 +69,12 @@ export function GameScreen({
   onGameOver,
 }: GameScreenProps) {
   const { lang } = useLanguage();
+  const { themeId } = useTheme();
+  const theme = getThemeConfig(themeId);
   const langRef = useRef(lang);
   langRef.current = lang;
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -528,6 +534,8 @@ export function GameScreen({
       canvas.width,
       t("hud.score", langRef.current),
       t("hud.level", langRef.current),
+      themeRef.current.primaryColor,
+      themeRef.current.secondaryColor,
     );
 
     animFrameRef.current = requestAnimationFrame(gameLoop);
@@ -779,10 +787,7 @@ export function GameScreen({
       {touchMode && (
         <div
           className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, oklch(0.04 0.02 265) 0%, oklch(0.08 0.025 250) 100%)",
-          }}
+          style={{ background: theme.bgGradient }}
         />
       )}
 
@@ -800,8 +805,8 @@ export function GameScreen({
             className="px-3 py-1.5 rounded-full text-xs font-semibold tracking-widest"
             style={{
               background: "rgba(0,0,0,0.6)",
-              border: "1px solid oklch(0.78 0.22 195 / 0.4)",
-              color: "oklch(0.78 0.22 195)",
+              border: `1px solid ${theme.primaryColor}60`,
+              color: theme.primaryColor,
               fontFamily: "'Sora', sans-serif",
             }}
           >
@@ -822,16 +827,16 @@ export function GameScreen({
               popup.type === "heart"
                 ? "#FF4444"
                 : popup.type === "coin"
-                  ? "#FFD700"
-                  : "oklch(0.78 0.22 195)",
+                  ? theme.secondaryColor
+                  : theme.primaryColor,
             fontSize: popup.type !== "score" ? "18px" : undefined,
             fontWeight: "bold",
             textShadow:
               popup.type === "heart"
                 ? "0 0 10px #FF4444"
                 : popup.type === "coin"
-                  ? "0 0 10px #FFD700"
-                  : undefined,
+                  ? `0 0 10px ${theme.secondaryColor}`
+                  : `0 0 10px ${theme.primaryColor}`,
           }}
         >
           {popup.type === "heart"
@@ -849,9 +854,9 @@ export function GameScreen({
             className="px-4 py-2 rounded-full text-sm"
             style={{
               background: "rgba(0,0,0,0.7)",
-              color: "oklch(0.78 0.22 195)",
+              color: theme.primaryColor,
               fontFamily: "'Sora', sans-serif",
-              border: "1px solid oklch(0.78 0.22 195 / 0.3)",
+              border: `1px solid ${theme.primaryColor}50`,
             }}
           >
             {t("game.camera_loading", lang)}
@@ -875,11 +880,11 @@ export function GameScreen({
                 fontFamily: "'Orbitron', 'Sora', sans-serif",
                 fontSize: countdown === "go" ? "72px" : "120px",
                 fontWeight: "900",
-                color: countdown === "go" ? "oklch(0.85 0.20 80)" : "#fff",
+                color: countdown === "go" ? theme.secondaryColor : "#fff",
                 textShadow:
                   countdown === "go"
-                    ? "0 0 40px oklch(0.82 0.20 80 / 0.9), 0 0 80px oklch(0.82 0.20 80 / 0.5)"
-                    : "0 0 40px oklch(0.78 0.22 195 / 0.9), 0 0 80px oklch(0.78 0.22 195 / 0.5)",
+                    ? `0 0 40px ${theme.secondaryColor}E6, 0 0 80px ${theme.secondaryColor}80`
+                    : `0 0 40px ${theme.primaryColor}E6, 0 0 80px ${theme.primaryColor}80`,
                 letterSpacing: countdown === "go" ? "0.1em" : "0",
               }}
             >
@@ -899,8 +904,8 @@ export function GameScreen({
           className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
           style={{
             background: "rgba(0,0,0,0.6)",
-            border: "1px solid oklch(0.78 0.22 195 / 0.4)",
-            color: "oklch(0.78 0.22 195)",
+            border: `1px solid ${theme.primaryColor}60`,
+            color: theme.primaryColor,
           }}
           title={
             isPaused
@@ -960,18 +965,19 @@ export function GameScreen({
               className="rounded-3xl px-8 py-8 w-full max-w-xs mx-4 text-center"
               style={{
                 background:
+                  theme.cardBg ??
                   "linear-gradient(135deg, oklch(0.10 0.03 265 / 0.97), oklch(0.08 0.02 265 / 0.99))",
-                border: "1px solid oklch(0.78 0.22 195 / 0.4)",
-                boxShadow: "0 0 40px oklch(0.78 0.22 195 / 0.2)",
+                border: `1px solid ${theme.primaryColor}60`,
+                boxShadow: theme.glow ?? `0 0 40px ${theme.primaryColor}30`,
               }}
             >
               {/* Title */}
               <h2
                 className="text-2xl font-black tracking-widest mb-6"
                 style={{
-                  color: "oklch(0.78 0.22 195)",
+                  color: theme.primaryColor,
                   fontFamily: "'Orbitron', 'Sora', sans-serif",
-                  textShadow: "0 0 20px oklch(0.78 0.22 195 / 0.5)",
+                  textShadow: `0 0 20px ${theme.primaryColor}80`,
                 }}
               >
                 {t("game.pause.title", lang)}
@@ -987,11 +993,12 @@ export function GameScreen({
                   className="w-full h-12 rounded-xl font-bold tracking-widest text-sm transition-all"
                   style={{
                     background:
-                      "linear-gradient(135deg, oklch(0.55 0.22 195), oklch(0.45 0.18 220))",
-                    border: "1px solid oklch(0.78 0.22 195 / 0.6)",
+                      theme.btnBg ??
+                      `linear-gradient(135deg, ${theme.primaryColor}, ${theme.accentColor})`,
+                    border: `1px solid ${theme.primaryColor}90`,
                     color: "#fff",
                     fontFamily: "'Orbitron', 'Sora', sans-serif",
-                    boxShadow: "0 0 15px oklch(0.78 0.22 195 / 0.3)",
+                    boxShadow: `0 0 15px ${theme.primaryColor}50`,
                   }}
                 >
                   ▶ {t("game.pause.resume", lang)}
@@ -1001,8 +1008,8 @@ export function GameScreen({
                 <div
                   className="rounded-xl px-3 py-2"
                   style={{
-                    background: "oklch(0.10 0.02 265 / 0.5)",
-                    border: "1px solid oklch(0.78 0.22 195 / 0.2)",
+                    background: "rgba(0,0,0,0.3)",
+                    border: `1px solid ${theme.primaryColor}30`,
                   }}
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -1014,7 +1021,7 @@ export function GameScreen({
                       style={{
                         color: isMuted
                           ? "oklch(0.45 0.03 265)"
-                          : "oklch(0.85 0.18 80)",
+                          : theme.secondaryColor,
                         fontFamily: "'Sora', sans-serif",
                         background: "none",
                         border: "none",
@@ -1033,7 +1040,7 @@ export function GameScreen({
                       className="text-xs opacity-50"
                       style={{
                         fontFamily: "'Orbitron', monospace",
-                        color: "oklch(0.82 0.20 80)",
+                        color: theme.secondaryColor,
                       }}
                     >
                       {Math.round(volume * 100)}%
@@ -1051,8 +1058,8 @@ export function GameScreen({
                     }
                     className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
                     style={{
-                      accentColor: "oklch(0.82 0.20 80)",
-                      background: `linear-gradient(to right, oklch(0.82 0.20 80) ${(isMuted ? 0 : volume) * 100}%, oklch(0.20 0.02 265) ${(isMuted ? 0 : volume) * 100}%)`,
+                      accentColor: theme.secondaryColor,
+                      background: `linear-gradient(to right, ${theme.secondaryColor} ${(isMuted ? 0 : volume) * 100}%, oklch(0.20 0.02 265) ${(isMuted ? 0 : volume) * 100}%)`,
                     }}
                   />
                 </div>

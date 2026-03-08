@@ -258,52 +258,76 @@ export function drawPowerUp(
   const pulse = 1 + Math.sin(powerUp.pulsePhase) * 0.08;
 
   if (powerUp.type === "heart") {
-    // Kırmızı kalp
+    // Gerçekçi kırmızı kalp
     ctx.scale(pulse, pulse);
     const r = powerUp.radius;
 
     // Outer glow
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = "rgba(255, 60, 60, 0.8)";
+    ctx.shadowBlur = 24;
+    ctx.shadowColor = "rgba(255, 60, 60, 0.9)";
 
-    // Heart shape using bezier curves
+    // Perfect heart shape using standard bezier formula
+    // Heart centered at (0,0), size ~r*2
+    const hs = r * 0.9; // heart scale factor
     ctx.beginPath();
-    const s = r * 0.055;
-    ctx.moveTo(0, r * 0.3);
+    // Start at the bottom point of the heart
+    ctx.moveTo(0, hs);
+    // Left lobe
     ctx.bezierCurveTo(
-      -r * 0.6 * s * 10,
-      r * 0.05 * s * 10,
-      -r * 1.0,
-      -r * 0.4,
-      0,
-      -r * 0.7,
+      -hs * 0.2,
+      hs * 0.6,
+      -hs * 1.1,
+      hs * 0.3,
+      -hs * 1.1,
+      -hs * 0.1,
     );
-    ctx.bezierCurveTo(
-      r * 1.0,
-      -r * 0.4,
-      r * 0.6 * s * 10,
-      r * 0.05 * s * 10,
-      0,
-      r * 0.3,
-    );
+    ctx.bezierCurveTo(-hs * 1.1, -hs * 0.65, -hs * 0.6, -hs, 0, -hs * 0.5);
+    // Right lobe
+    ctx.bezierCurveTo(hs * 0.6, -hs, hs * 1.1, -hs * 0.65, hs * 1.1, -hs * 0.1);
+    ctx.bezierCurveTo(hs * 1.1, hs * 0.3, hs * 0.2, hs * 0.6, 0, hs);
     ctx.closePath();
 
-    const heartGrad = ctx.createRadialGradient(-r * 0.2, -r * 0.3, 0, 0, 0, r);
-    heartGrad.addColorStop(0, "#FF8080");
-    heartGrad.addColorStop(0.5, "#FF2222");
-    heartGrad.addColorStop(1, "#CC0000");
+    const heartGrad = ctx.createRadialGradient(
+      -r * 0.2,
+      -r * 0.25,
+      r * 0.05,
+      0,
+      0,
+      r * 1.1,
+    );
+    heartGrad.addColorStop(0, "#FF9090");
+    heartGrad.addColorStop(0.4, "#FF2222");
+    heartGrad.addColorStop(1, "#990000");
     ctx.fillStyle = heartGrad;
     ctx.fill();
-    ctx.strokeStyle = "#FF6666";
+
+    ctx.strokeStyle = "#FF8888";
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // White specular
+    // White specular highlight (top-left)
     ctx.shadowBlur = 0;
+    ctx.save();
     ctx.beginPath();
-    ctx.ellipse(-r * 0.25, -r * 0.4, r * 0.18, r * 0.12, -0.4, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.moveTo(0, hs);
+    ctx.bezierCurveTo(
+      -hs * 0.2,
+      hs * 0.6,
+      -hs * 1.1,
+      hs * 0.3,
+      -hs * 1.1,
+      -hs * 0.1,
+    );
+    ctx.bezierCurveTo(-hs * 1.1, -hs * 0.65, -hs * 0.6, -hs, 0, -hs * 0.5);
+    ctx.bezierCurveTo(hs * 0.6, -hs, hs * 1.1, -hs * 0.65, hs * 1.1, -hs * 0.1);
+    ctx.bezierCurveTo(hs * 1.1, hs * 0.3, hs * 0.2, hs * 0.6, 0, hs);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.35, -r * 0.35, r * 0.32, r * 0.2, -0.5, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
     ctx.fill();
+    ctx.restore();
   } else {
     // Altın coin
     ctx.rotate(powerUp.rotation);
@@ -362,7 +386,7 @@ export function drawPowerUp(
 }
 
 /**
- * Draw player badge (shield) on canvas
+ * Draw player badge (superhero emblem shield) on canvas
  */
 export function drawPlayerBadge(
   ctx: CanvasRenderingContext2D,
@@ -372,7 +396,7 @@ export function drawPlayerBadge(
   isInvincible: boolean,
 ): void {
   const { x, y } = bodyCenter;
-  const r = 50;
+  const r = 52;
 
   ctx.save();
 
@@ -381,66 +405,130 @@ export function drawPlayerBadge(
     ctx.translate((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6);
   }
 
-  const color = isHit ? "#FF3333" : "#FFD700";
-  const glowColor = isHit ? "rgba(255, 51, 51, 0.6)" : "rgba(255, 215, 0, 0.6)";
-
-  // Outer glow ring
-  ctx.shadowBlur = 20;
-  ctx.shadowColor = glowColor;
+  const primaryColor = isHit ? "#FF3333" : "#FFD700";
+  const rimColor = isHit ? "#FF6666" : "#FFF080";
+  const glowColor = isHit ? "rgba(255, 51, 51, 0.7)" : "rgba(255, 215, 0, 0.7)";
+  const fillColor1 = isHit
+    ? "rgba(220, 30, 30, 0.65)"
+    : "rgba(255, 200, 0, 0.5)";
+  const fillColor2 = isHit
+    ? "rgba(140, 0, 0, 0.45)"
+    : "rgba(180, 110, 0, 0.35)";
+  const fillColor3 = isHit ? "rgba(80, 0, 0, 0.25)" : "rgba(100, 60, 0, 0.18)";
 
   // Invincibility flash effect
   const opacity =
-    isInvincible && !isHit ? 0.5 + Math.sin(Date.now() * 0.015) * 0.5 : 1.0;
+    isInvincible && !isHit ? 0.4 + Math.sin(Date.now() * 0.02) * 0.55 : 1.0;
   ctx.globalAlpha = opacity;
 
-  // Shield gradient background
-  const shieldGrad = ctx.createRadialGradient(
-    x - r * 0.2,
-    y - r * 0.3,
-    r * 0.1,
-    x,
-    y,
-    r,
-  );
-  if (isHit) {
-    shieldGrad.addColorStop(0, "rgba(255, 80, 80, 0.5)");
-    shieldGrad.addColorStop(0.6, "rgba(180, 20, 20, 0.35)");
-    shieldGrad.addColorStop(1, "rgba(100, 0, 0, 0.2)");
-  } else {
-    shieldGrad.addColorStop(0, "rgba(255, 230, 50, 0.4)");
-    shieldGrad.addColorStop(0.6, "rgba(200, 150, 0, 0.25)");
-    shieldGrad.addColorStop(1, "rgba(120, 80, 0, 0.15)");
-  }
+  // ===== SUPERHERO PENTAGON SHIELD SHAPE =====
+  // Classic comic-book shield: slightly wider top, pointed bottom
+  ctx.save();
+  ctx.translate(x, y);
 
-  // Draw shield circle
+  const sw = r; // half-width
+  const sh = r * 1.15; // half-height
+  const topR = r * 0.18; // top corner radius
+
+  // Shield path: flat top with rounded corners, tapered sides, pointed bottom
   ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
+  // Top-left corner arc
+  ctx.moveTo(-sw + topR, -sh * 0.55);
+  ctx.quadraticCurveTo(-sw, -sh * 0.55, -sw, -sh * 0.55 + topR);
+  // Left side curving inward
+  ctx.bezierCurveTo(-sw, -sh * 0.1, -sw * 0.85, sh * 0.35, 0, sh);
+  // Right side (mirror)
+  ctx.bezierCurveTo(sw * 0.85, sh * 0.35, sw, -sh * 0.1, sw, -sh * 0.55 + topR);
+  // Top-right corner arc
+  ctx.quadraticCurveTo(sw, -sh * 0.55, sw - topR, -sh * 0.55);
+  // Top edge
+  ctx.lineTo(-sw + topR, -sh * 0.55);
+  ctx.closePath();
+
+  // Outer glow
+  ctx.shadowBlur = 28;
+  ctx.shadowColor = glowColor;
+
+  // Background gradient (radial, from bright inner to dark edge)
+  const shieldGrad = ctx.createRadialGradient(
+    -sw * 0.15,
+    -sh * 0.25,
+    r * 0.05,
+    0,
+    0,
+    r * 1.3,
+  );
+  shieldGrad.addColorStop(0, fillColor1);
+  shieldGrad.addColorStop(0.55, fillColor2);
+  shieldGrad.addColorStop(1, fillColor3);
   ctx.fillStyle = shieldGrad;
   ctx.fill();
 
-  // Shield border
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
+  // Outer border
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = primaryColor;
+  ctx.lineWidth = 3.5;
   ctx.stroke();
 
-  // Inner decorative ring
+  // ===== INNER DECORATIVE SHIELD (smaller, inset) =====
+  const innerScale = 0.72;
+  ctx.save();
+  ctx.scale(innerScale, innerScale);
+
   ctx.beginPath();
-  ctx.arc(x, y, r - 8, 0, Math.PI * 2);
-  ctx.strokeStyle = `${color}44`;
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  ctx.moveTo(-sw + topR, -sh * 0.55);
+  ctx.quadraticCurveTo(-sw, -sh * 0.55, -sw, -sh * 0.55 + topR);
+  ctx.bezierCurveTo(-sw, -sh * 0.1, -sw * 0.85, sh * 0.35, 0, sh);
+  ctx.bezierCurveTo(sw * 0.85, sh * 0.35, sw, -sh * 0.1, sw, -sh * 0.55 + topR);
+  ctx.quadraticCurveTo(sw, -sh * 0.55, sw - topR, -sh * 0.55);
+  ctx.lineTo(-sw + topR, -sh * 0.55);
+  ctx.closePath();
 
-  // Player initial letter
+  ctx.strokeStyle = `${rimColor}55`;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // ===== SPECULAR HIGHLIGHT (top-left shine) =====
+  const specGrad = ctx.createRadialGradient(
+    -sw * 0.3,
+    -sh * 0.3,
+    0,
+    -sw * 0.3,
+    -sh * 0.3,
+    r * 0.55,
+  );
+  specGrad.addColorStop(0, "rgba(255, 255, 255, 0.35)");
+  specGrad.addColorStop(0.6, "rgba(255, 255, 255, 0.08)");
+  specGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+  // Clip to shield shape for specular
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(-sw + topR, -sh * 0.55);
+  ctx.quadraticCurveTo(-sw, -sh * 0.55, -sw, -sh * 0.55 + topR);
+  ctx.bezierCurveTo(-sw, -sh * 0.1, -sw * 0.85, sh * 0.35, 0, sh);
+  ctx.bezierCurveTo(sw * 0.85, sh * 0.35, sw, -sh * 0.1, sw, -sh * 0.55 + topR);
+  ctx.quadraticCurveTo(sw, -sh * 0.55, sw - topR, -sh * 0.55);
+  ctx.lineTo(-sw + topR, -sh * 0.55);
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle = specGrad;
+  ctx.fillRect(-sw, -sh, sw * 2, sh * 0.7);
+  ctx.restore();
+
+  // ===== PLAYER INITIAL LETTER =====
   const initial = playerName.charAt(0).toUpperCase() || "?";
-  ctx.shadowBlur = 10;
-  ctx.shadowColor = "rgba(255, 255, 255, 0.8)";
-  ctx.font = 'bold 28px "Orbitron", "Sora", sans-serif';
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = "rgba(255, 255, 255, 0.9)";
+  ctx.font = `bold 30px "Orbitron", "Sora", sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#FFFFFF";
-  ctx.fillText(initial, x, y);
+  ctx.fillText(initial, 0, -sh * 0.08);
 
-  ctx.restore();
+  ctx.restore(); // restore translate(x, y)
+  ctx.restore(); // restore main
 }
 
 /**
@@ -454,6 +542,8 @@ export function drawHUD(
   canvasWidth: number,
   scoreLabel = "SCORE",
   levelLabel = "LEVEL",
+  primaryColor = "#00ffcc",
+  secondaryColor = "#FFD700",
 ): void {
   ctx.save();
 
@@ -461,11 +551,11 @@ export function drawHUD(
   ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
   ctx.fillRect(0, 0, canvasWidth, 70);
 
-  // Border bottom
+  // Border bottom with theme primary color
   const hudGrad = ctx.createLinearGradient(0, 68, canvasWidth, 68);
   hudGrad.addColorStop(0, "transparent");
-  hudGrad.addColorStop(0.3, "#00ffcc44");
-  hudGrad.addColorStop(0.7, "#00ffcc44");
+  hudGrad.addColorStop(0.3, `${primaryColor}44`);
+  hudGrad.addColorStop(0.7, `${primaryColor}44`);
   hudGrad.addColorStop(1, "transparent");
   ctx.fillStyle = hudGrad;
   ctx.fillRect(0, 68, canvasWidth, 2);
@@ -490,24 +580,24 @@ export function drawHUD(
   // Score (center)
   ctx.textAlign = "center";
   ctx.font = 'bold 14px "Orbitron", "Sora", monospace';
-  ctx.fillStyle = "rgba(0, 255, 204, 0.6)";
+  ctx.fillStyle = `${primaryColor}99`;
   ctx.fillText(scoreLabel, canvasWidth / 2, 18);
   ctx.font = 'bold 26px "Orbitron", "Sora", monospace';
-  ctx.fillStyle = "#00ffcc";
+  ctx.fillStyle = primaryColor;
   ctx.shadowBlur = 12;
-  ctx.shadowColor = "#00ffcc";
+  ctx.shadowColor = primaryColor;
   ctx.fillText(score.toString(), canvasWidth / 2, 48);
   ctx.shadowBlur = 0;
 
   // Level (right side)
   ctx.textAlign = "right";
   ctx.font = 'bold 12px "Orbitron", "Sora", monospace';
-  ctx.fillStyle = "rgba(255, 215, 0, 0.6)";
+  ctx.fillStyle = `${secondaryColor}99`;
   ctx.fillText(levelLabel, canvasWidth - 16, 18);
   ctx.font = 'bold 28px "Orbitron", "Sora", monospace';
-  ctx.fillStyle = "#FFD700";
+  ctx.fillStyle = secondaryColor;
   ctx.shadowBlur = 12;
-  ctx.shadowColor = "#FFD700";
+  ctx.shadowColor = secondaryColor;
   ctx.fillText(level.toString(), canvasWidth - 16, 48);
   ctx.shadowBlur = 0;
 
