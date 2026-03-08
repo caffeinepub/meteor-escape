@@ -452,6 +452,8 @@ export function drawHUD(
   score: number,
   level: number,
   canvasWidth: number,
+  scoreLabel = "SCORE",
+  levelLabel = "LEVEL",
 ): void {
   ctx.save();
 
@@ -489,7 +491,7 @@ export function drawHUD(
   ctx.textAlign = "center";
   ctx.font = 'bold 14px "Orbitron", "Sora", monospace';
   ctx.fillStyle = "rgba(0, 255, 204, 0.6)";
-  ctx.fillText("SCORE", canvasWidth / 2, 18);
+  ctx.fillText(scoreLabel, canvasWidth / 2, 18);
   ctx.font = 'bold 26px "Orbitron", "Sora", monospace';
   ctx.fillStyle = "#00ffcc";
   ctx.shadowBlur = 12;
@@ -501,7 +503,7 @@ export function drawHUD(
   ctx.textAlign = "right";
   ctx.font = 'bold 12px "Orbitron", "Sora", monospace';
   ctx.fillStyle = "rgba(255, 215, 0, 0.6)";
-  ctx.fillText("BÖLÜM", canvasWidth - 16, 18);
+  ctx.fillText(levelLabel, canvasWidth - 16, 18);
   ctx.font = 'bold 28px "Orbitron", "Sora", monospace';
   ctx.fillStyle = "#FFD700";
   ctx.shadowBlur = 12;

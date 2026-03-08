@@ -1,3 +1,4 @@
+import { LanguageSelector } from "@/components/LanguageSelector";
 import { getAudioEngine } from "@/game/audioEngine";
 import {
   INVINCIBILITY_DURATION,
@@ -10,6 +11,7 @@ import {
   getLevelForScore,
   getPowerUpSpawnInterval,
 } from "@/game/constants";
+import { t, useLanguage } from "@/game/i18n";
 import {
   checkCollision,
   checkPowerUpCollision,
@@ -32,10 +34,10 @@ import type {
   PoseResults,
   PowerUp,
 } from "@/game/types";
-import { Pause, Play } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GameOverScreen } from "./GameOverScreen";
+import { LegendScreen } from "./LegendScreen";
 import { LevelUpScreen } from "./LevelUpScreen";
 
 interface ScorePopup {
@@ -55,6 +57,8 @@ interface GameScreenProps {
   onGameOver: (score: number, level: number) => void;
 }
 
+type CountdownValue = 3 | 2 | 1 | "go" | null;
+
 export function GameScreen({
   playerName,
   initialScore = 0,
@@ -62,6 +66,9 @@ export function GameScreen({
   initialLives = MAX_LIVES,
   onGameOver,
 }: GameScreenProps) {
+  const { lang } = useLanguage();
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -87,20 +94,38 @@ export function GameScreen({
   const isPausedRef = useRef(false);
   const gameActiveRef = useRef(true);
   const powerUpsRef = useRef<PowerUp[]>([]);
+  // Touch/mouse fallback mode
+  const touchModeRef = useRef(false);
+  const touchBodyRef = useRef<BodyCenter | null>(null);
+  // Session stats
+  const statsMeteorsDodgedRef = useRef(0);
+  const statsHitsRef = useRef(0);
+  const statsPowerUpsRef = useRef(0);
 
   // React state (for UI rendering)
   const [_score, setScore] = useState(initialScore);
   const [_lives, setLives] = useState(initialLives);
-  const [currentLevel, setCurrentLevel] = useState(initialLevel);
+  const [_currentLevel, setCurrentLevel] = useState(initialLevel);
   const [isPaused, setIsPaused] = useState(false);
+  const [showPauseMenu, setShowPauseMenu] = useState(false);
   const [showLevelUp, setShowLevelUp] = useState(false);
+  const [sessionStats, setSessionStats] = useState({
+    dodged: 0,
+    hits: 0,
+    powerUps: 0,
+  });
   const [levelUpData, setLevelUpData] = useState({
     level: initialLevel,
     score: initialScore,
   });
   const [showGameOver, setShowGameOver] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
   const [scorePopups, setScorePopups] = useState<ScorePopup[]>([]);
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
+  const [isMuted, setIsMuted] = useState(() => getAudioEngine().isMuted);
+  const [volume, setVolumeState] = useState(() => getAudioEngine().volume);
+  const [countdown, setCountdown] = useState<CountdownValue>(3);
+  const [touchMode, setTouchMode] = useState(false);
 
   // Score popup helper
   const addScorePopup = useCallback(
@@ -134,8 +159,9 @@ export function GameScreen({
     }
 
     if (!window.Pose) {
-      console.warn("MediaPipe Pose not available");
-      // Fallback: use mouse/touch position
+      console.warn("MediaPipe Pose not available -- enabling touch mode");
+      touchModeRef.current = true;
+      setTouchMode(true);
       setMediaPipeReady(true);
       return;
     }
@@ -197,54 +223,64 @@ export function GameScreen({
 
       poseRef.current = pose;
 
-      // Try to start camera via MediaPipe Camera helper
-      if (window.Camera) {
-        const mpCamera = new window.Camera(videoRef.current, {
-          onFrame: async () => {
-            if (poseRef.current && videoRef.current && gameActiveRef.current) {
-              await poseRef.current.send({ image: videoRef.current });
-            }
-          },
-          width: 640,
-          height: 480,
-        });
-        await mpCamera.start();
-        cameraRef.current = mpCamera;
-      } else {
-        // Fallback: getUserMedia directly
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-          },
-        });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
+      // Try camera via getUserMedia
+      try {
+        if (window.Camera) {
+          const mpCamera = new window.Camera(videoRef.current, {
+            onFrame: async () => {
+              if (
+                poseRef.current &&
+                videoRef.current &&
+                gameActiveRef.current
+              ) {
+                await poseRef.current.send({ image: videoRef.current });
+              }
+            },
+            width: 640,
+            height: 480,
+          });
+          await mpCamera.start();
+          cameraRef.current = mpCamera;
+        } else {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: "user",
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+            },
+          });
+          streamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            await videoRef.current.play();
 
-          // Process frames manually
-          const processFrame = async () => {
-            if (!gameActiveRef.current) return;
-            if (
-              poseRef.current &&
-              videoRef.current &&
-              videoRef.current.readyState >= 2
-            ) {
-              await poseRef.current.send({ image: videoRef.current });
-            }
-            if (gameActiveRef.current) {
-              requestAnimationFrame(processFrame);
-            }
-          };
-          processFrame();
+            const processFrame = async () => {
+              if (!gameActiveRef.current) return;
+              if (
+                poseRef.current &&
+                videoRef.current &&
+                videoRef.current.readyState >= 2
+              ) {
+                await poseRef.current.send({ image: videoRef.current });
+              }
+              if (gameActiveRef.current) {
+                requestAnimationFrame(processFrame);
+              }
+            };
+            processFrame();
+          }
         }
+      } catch (cameraErr) {
+        console.warn("Camera failed, enabling touch mode:", cameraErr);
+        touchModeRef.current = true;
+        setTouchMode(true);
       }
 
       setMediaPipeReady(true);
     } catch (err) {
       console.error("MediaPipe init error:", err);
+      touchModeRef.current = true;
+      setTouchMode(true);
       setMediaPipeReady(true); // continue without pose
     }
   }, []);
@@ -309,27 +345,24 @@ export function GameScreen({
       return;
     }
 
+    // In touch mode, use touch body position
+    const bodyCenter = touchModeRef.current
+      ? touchBodyRef.current
+      : bodyCenterRef.current;
+
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (isPausedRef.current) {
-      // Draw pause overlay
-      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      // Draw pause overlay (semi-transparent, actual menu is in DOM)
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.textAlign = "center";
-      ctx.font = 'bold 36px "Orbitron", "Sora", monospace';
-      ctx.fillStyle = "#00ffcc";
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "#00ffcc";
-      ctx.fillText("DURAKLATILDI", canvas.width / 2, canvas.height / 2);
-      ctx.shadowBlur = 0;
       animFrameRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
     // --- Update meteors ---
     const updatedMeteors: Meteor[] = [];
-    const bodyCenter = bodyCenterRef.current;
     let scoreGained = 0;
     let hitOccurred = false;
 
@@ -339,6 +372,7 @@ export function GameScreen({
       // Check if passed through (dodge)
       if (isMeteorOffScreen(updated, canvas.height)) {
         scoreGained += SCORE_PER_METEOR;
+        statsMeteorsDodgedRef.current += 1;
 
         // Dodge sound at lower frequency
         if (Math.random() < 0.4) {
@@ -375,6 +409,7 @@ export function GameScreen({
 
       // Player collision -- pick up
       if (bodyCenter && checkPowerUpCollision(updated, bodyCenter)) {
+        statsPowerUpsRef.current += 1;
         if (updated.type === "heart") {
           const newLives = Math.min(livesRef.current + 1, MAX_LIVES);
           livesRef.current = newLives;
@@ -385,7 +420,7 @@ export function GameScreen({
           scoreGained += bonus;
           addScorePopup(updated.x, updated.y, bonus, "coin");
         }
-        getAudioEngine().playLevelUpSound(); // reuse for pickup feedback
+        getAudioEngine().playPickupSound(updated.type);
         continue; // remove collected power-up
       }
 
@@ -408,6 +443,15 @@ export function GameScreen({
         // Trigger level up screen
         gameActiveRef.current = false;
         meteorsRef.current = [];
+
+        // Bölüm 50 tamamlandı -- Efsane ekranı
+        if (newLevel.level >= LEVELS.length) {
+          getAudioEngine().stopBackgroundMusic();
+          getAudioEngine().playLevelUpSound();
+          setShowLegend(true);
+          return;
+        }
+
         setLevelUpData({ level: newLevel.level, score: newScore });
         setShowLevelUp(true);
         getAudioEngine().playLevelUpSound();
@@ -417,6 +461,7 @@ export function GameScreen({
 
     // Handle hit
     if (hitOccurred && !isInvincibleRef.current) {
+      statsHitsRef.current += 1;
       const newLives = livesRef.current - 1;
       livesRef.current = newLives;
       setLives(newLives);
@@ -442,6 +487,11 @@ export function GameScreen({
         gameActiveRef.current = false;
         getAudioEngine().stopBackgroundMusic();
         getAudioEngine().playGameOverSound();
+        setSessionStats({
+          dodged: statsMeteorsDodgedRef.current,
+          hits: statsHitsRef.current,
+          powerUps: statsPowerUpsRef.current,
+        });
         setShowGameOver(true);
         return;
       }
@@ -476,6 +526,8 @@ export function GameScreen({
       scoreRef.current,
       levelRef.current,
       canvas.width,
+      t("hud.score", langRef.current),
+      t("hud.level", langRef.current),
     );
 
     animFrameRef.current = requestAnimationFrame(gameLoop);
@@ -492,7 +544,39 @@ export function GameScreen({
       video.style.width = "100%";
       video.style.height = "100%";
     }
+    // Initialize touch position to center if in touch mode
+    if (touchModeRef.current && !touchBodyRef.current) {
+      touchBodyRef.current = {
+        x: window.innerWidth / 2,
+        y: window.innerHeight * 0.5,
+      };
+    }
   }, []);
+
+  // ===================== COUNTDOWN LOGIC =====================
+  const startCountdownAndGame = useCallback(() => {
+    setCountdown(3);
+
+    const steps: { value: CountdownValue; delay: number }[] = [
+      { value: 3, delay: 0 },
+      { value: 2, delay: 1000 },
+      { value: 1, delay: 2000 },
+      { value: "go", delay: 3000 },
+      { value: null, delay: 3700 },
+    ];
+
+    for (const step of steps) {
+      setTimeout(() => {
+        setCountdown(step.value);
+        if (step.value === null && gameActiveRef.current) {
+          getAudioEngine().startBackgroundMusic();
+          gameLoop();
+          scheduleSpawn();
+          schedulePowerUpSpawn();
+        }
+      }, step.delay);
+    }
+  }, [gameLoop, scheduleSpawn, schedulePowerUpSpawn]);
 
   // ===================== MOUNT / CLEANUP =====================
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
@@ -509,22 +593,15 @@ export function GameScreen({
     handleResize();
     window.addEventListener("resize", handleResize);
 
-    // Init MediaPipe
-    initMediaPipe();
-
-    // Start game loop after short delay
-    const startDelay = setTimeout(() => {
+    // Init MediaPipe then start countdown
+    initMediaPipe().then(() => {
       if (gameActiveRef.current) {
-        getAudioEngine().startBackgroundMusic();
-        gameLoop();
-        scheduleSpawn();
-        schedulePowerUpSpawn();
+        startCountdownAndGame();
       }
-    }, 500);
+    });
 
     return () => {
       gameActiveRef.current = false;
-      clearTimeout(startDelay);
       window.removeEventListener("resize", handleResize);
 
       if (animFrameRef.current !== null) {
@@ -570,11 +647,24 @@ export function GameScreen({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ===================== TOUCH / MOUSE MOVE =====================
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!touchModeRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    touchBodyRef.current = { x, y };
+    bodyCenterRef.current = { x, y };
+  }
+
   // ===================== PAUSE TOGGLE =====================
   function togglePause() {
     const newPaused = !isPausedRef.current;
     isPausedRef.current = newPaused;
     setIsPaused(newPaused);
+    setShowPauseMenu(newPaused);
 
     if (newPaused) {
       getAudioEngine().stopBackgroundMusic();
@@ -591,6 +681,34 @@ export function GameScreen({
     }
   }
 
+  function handleResume() {
+    togglePause();
+  }
+
+  function handleToggleMute() {
+    const newMuted = getAudioEngine().toggleMute();
+    setIsMuted(newMuted);
+  }
+
+  function handleVolumeChange(val: number) {
+    getAudioEngine().setVolume(val);
+    setVolumeState(val);
+    if (val > 0 && isMuted) {
+      getAudioEngine().setMute(false);
+      setIsMuted(false);
+    }
+    if (val === 0 && !isMuted) {
+      getAudioEngine().setMute(true);
+      setIsMuted(true);
+    }
+  }
+
+  function handleMainMenu() {
+    gameActiveRef.current = false;
+    getAudioEngine().stopBackgroundMusic();
+    onGameOver(scoreRef.current, levelRef.current);
+  }
+
   // ===================== LEVEL UP CONTINUE =====================
   function handleLevelUpContinue() {
     setShowLevelUp(false);
@@ -602,14 +720,30 @@ export function GameScreen({
     livesRef.current = MAX_LIVES;
     setLives(MAX_LIVES);
 
-    // Resume game loop
-    if (animFrameRef.current !== null) {
-      cancelAnimationFrame(animFrameRef.current);
+    // Countdown before resuming
+    setCountdown(3);
+    const steps: { value: CountdownValue; delay: number }[] = [
+      { value: 3, delay: 0 },
+      { value: 2, delay: 1000 },
+      { value: 1, delay: 2000 },
+      { value: "go", delay: 3000 },
+      { value: null, delay: 3700 },
+    ];
+
+    for (const step of steps) {
+      setTimeout(() => {
+        setCountdown(step.value);
+        if (step.value === null && gameActiveRef.current) {
+          if (animFrameRef.current !== null) {
+            cancelAnimationFrame(animFrameRef.current);
+          }
+          getAudioEngine().startBackgroundMusic();
+          gameLoop();
+          scheduleSpawn();
+          schedulePowerUpSpawn();
+        }
+      }, step.delay);
     }
-    gameLoop();
-    scheduleSpawn();
-    schedulePowerUpSpawn();
-    getAudioEngine().startBackgroundMusic();
   }
 
   // ===================== GAME OVER =====================
@@ -618,12 +752,39 @@ export function GameScreen({
     onGameOver(scoreRef.current, levelRef.current);
   }
 
-  const levelConfig = LEVELS.find((l) => l.level === currentLevel) ?? LEVELS[0];
+  // Countdown display text
+  function getCountdownText(): string {
+    if (countdown === null) return "";
+    if (countdown === "go") return t("game.countdown.go", lang);
+    return t(`game.countdown.${countdown}`, lang);
+  }
 
   return (
-    <div className="game-container">
-      {/* Camera video (mirrored) */}
-      <video ref={videoRef} className="game-video" autoPlay playsInline muted />
+    <div
+      className="game-container"
+      onPointerMove={handlePointerMove}
+      style={{ cursor: touchMode ? "none" : undefined }}
+    >
+      {/* Camera video (mirrored) - hidden in touch mode */}
+      <video
+        ref={videoRef}
+        className="game-video"
+        autoPlay
+        playsInline
+        muted
+        style={{ display: touchMode ? "none" : undefined }}
+      />
+
+      {/* Touch mode background */}
+      {touchMode && (
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, oklch(0.04 0.02 265) 0%, oklch(0.08 0.025 250) 100%)",
+          }}
+        />
+      )}
 
       {/* Game canvas */}
       <canvas
@@ -631,6 +792,23 @@ export function GameScreen({
         data-ocid="game.canvas_target"
         className="game-canvas"
       />
+
+      {/* Touch mode cursor indicator */}
+      {touchMode && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div
+            className="px-3 py-1.5 rounded-full text-xs font-semibold tracking-widest"
+            style={{
+              background: "rgba(0,0,0,0.6)",
+              border: "1px solid oklch(0.78 0.22 195 / 0.4)",
+              color: "oklch(0.78 0.22 195)",
+              fontFamily: "'Sora', sans-serif",
+            }}
+          >
+            {t("game.touch_mode", lang)}
+          </div>
+        </div>
+      )}
 
       {/* Score popups (DOM layer) */}
       {scorePopups.map((popup) => (
@@ -676,42 +854,229 @@ export function GameScreen({
               border: "1px solid oklch(0.78 0.22 195 / 0.3)",
             }}
           >
-            Kamera başlatılıyor...
+            {t("game.camera_loading", lang)}
           </div>
         </div>
       )}
 
-      {/* Level indicator (top center, shown briefly) */}
-      <div
-        className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
-        style={{ fontFamily: "'Sora', sans-serif" }}
-      >
-        <div className="text-center">
-          <span
-            className="text-xs opacity-40 tracking-widest"
-            style={{ color: "oklch(0.82 0.20 80)" }}
+      {/* 3-2-1 Countdown overlay */}
+      <AnimatePresence>
+        {countdown !== null && (
+          <motion.div
+            key={String(countdown)}
+            initial={{ scale: 1.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.5, opacity: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+            className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none"
           >
-            BÖLÜM {currentLevel} — {levelConfig.spawnMs}ms spawn
-          </span>
-        </div>
+            <div
+              style={{
+                fontFamily: "'Orbitron', 'Sora', sans-serif",
+                fontSize: countdown === "go" ? "72px" : "120px",
+                fontWeight: "900",
+                color: countdown === "go" ? "oklch(0.85 0.20 80)" : "#fff",
+                textShadow:
+                  countdown === "go"
+                    ? "0 0 40px oklch(0.82 0.20 80 / 0.9), 0 0 80px oklch(0.82 0.20 80 / 0.5)"
+                    : "0 0 40px oklch(0.78 0.22 195 / 0.9), 0 0 80px oklch(0.78 0.22 195 / 0.5)",
+                letterSpacing: countdown === "go" ? "0.1em" : "0",
+              }}
+            >
+              {getCountdownText()}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Language selector + Pause button (top right) */}
+      <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+        <LanguageSelector />
+        <button
+          type="button"
+          data-ocid="game.pause_button"
+          onClick={togglePause}
+          className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
+          style={{
+            background: "rgba(0,0,0,0.6)",
+            border: "1px solid oklch(0.78 0.22 195 / 0.4)",
+            color: "oklch(0.78 0.22 195)",
+          }}
+          title={
+            isPaused
+              ? t("game.pause.resume", lang)
+              : t("game.pause.title", lang)
+          }
+        >
+          {isPaused ? (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="currentColor"
+              role="img"
+              aria-label="play"
+            >
+              <title>Play</title>
+              <polygon points="2,1 13,7 2,13" />
+            </svg>
+          ) : (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="currentColor"
+              role="img"
+              aria-label="pause"
+            >
+              <title>Pause</title>
+              <rect x="1" y="1" width="4" height="12" rx="1" />
+              <rect x="9" y="1" width="4" height="12" rx="1" />
+            </svg>
+          )}
+        </button>
       </div>
 
-      {/* Pause button */}
-      <motion.button
-        data-ocid="game.pause_button"
-        onClick={togglePause}
-        className="absolute top-4 right-4 z-40 w-10 h-10 rounded-xl flex items-center justify-center transition-all"
-        style={{
-          background: "rgba(0,0,0,0.6)",
-          border: "1px solid oklch(0.78 0.22 195 / 0.4)",
-          color: "oklch(0.78 0.22 195)",
-          marginTop: "4px",
-        }}
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
-      >
-        {isPaused ? <Play size={16} /> : <Pause size={16} />}
-      </motion.button>
+      {/* Pause Menu Overlay */}
+      <AnimatePresence>
+        {showPauseMenu && (
+          <motion.div
+            key="pause-menu"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="absolute inset-0 flex items-center justify-center z-50"
+            style={{
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(6px)",
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.85, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
+              className="rounded-3xl px-8 py-8 w-full max-w-xs mx-4 text-center"
+              style={{
+                background:
+                  "linear-gradient(135deg, oklch(0.10 0.03 265 / 0.97), oklch(0.08 0.02 265 / 0.99))",
+                border: "1px solid oklch(0.78 0.22 195 / 0.4)",
+                boxShadow: "0 0 40px oklch(0.78 0.22 195 / 0.2)",
+              }}
+            >
+              {/* Title */}
+              <h2
+                className="text-2xl font-black tracking-widest mb-6"
+                style={{
+                  color: "oklch(0.78 0.22 195)",
+                  fontFamily: "'Orbitron', 'Sora', sans-serif",
+                  textShadow: "0 0 20px oklch(0.78 0.22 195 / 0.5)",
+                }}
+              >
+                {t("game.pause.title", lang)}
+              </h2>
+
+              {/* Buttons */}
+              <div className="flex flex-col gap-3">
+                {/* Resume */}
+                <button
+                  type="button"
+                  data-ocid="pause.resume_button"
+                  onClick={handleResume}
+                  className="w-full h-12 rounded-xl font-bold tracking-widest text-sm transition-all"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, oklch(0.55 0.22 195), oklch(0.45 0.18 220))",
+                    border: "1px solid oklch(0.78 0.22 195 / 0.6)",
+                    color: "#fff",
+                    fontFamily: "'Orbitron', 'Sora', sans-serif",
+                    boxShadow: "0 0 15px oklch(0.78 0.22 195 / 0.3)",
+                  }}
+                >
+                  ▶ {t("game.pause.resume", lang)}
+                </button>
+
+                {/* Sound toggle + volume slider */}
+                <div
+                  className="rounded-xl px-3 py-2"
+                  style={{
+                    background: "oklch(0.10 0.02 265 / 0.5)",
+                    border: "1px solid oklch(0.78 0.22 195 / 0.2)",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <button
+                      type="button"
+                      data-ocid="pause.sound_toggle"
+                      onClick={handleToggleMute}
+                      className="flex items-center gap-1.5 text-sm font-semibold transition-all"
+                      style={{
+                        color: isMuted
+                          ? "oklch(0.45 0.03 265)"
+                          : "oklch(0.85 0.18 80)",
+                        fontFamily: "'Sora', sans-serif",
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      <span>{isMuted ? "🔇" : "🔊"}</span>
+                      <span>
+                        {isMuted
+                          ? t("game.pause.sound_off", lang)
+                          : t("game.pause.sound_on", lang)}
+                      </span>
+                    </button>
+                    <span
+                      className="text-xs opacity-50"
+                      style={{
+                        fontFamily: "'Orbitron', monospace",
+                        color: "oklch(0.82 0.20 80)",
+                      }}
+                    >
+                      {Math.round(volume * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    data-ocid="pause.volume_slider"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) =>
+                      handleVolumeChange(Number.parseFloat(e.target.value))
+                    }
+                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                    style={{
+                      accentColor: "oklch(0.82 0.20 80)",
+                      background: `linear-gradient(to right, oklch(0.82 0.20 80) ${(isMuted ? 0 : volume) * 100}%, oklch(0.20 0.02 265) ${(isMuted ? 0 : volume) * 100}%)`,
+                    }}
+                  />
+                </div>
+
+                {/* Main menu */}
+                <button
+                  type="button"
+                  data-ocid="pause.mainmenu_button"
+                  onClick={handleMainMenu}
+                  className="w-full h-11 rounded-xl font-semibold tracking-wider text-sm transition-all"
+                  style={{
+                    background: "oklch(0.12 0.03 25 / 0.4)",
+                    border: "1px solid oklch(0.60 0.22 25 / 0.4)",
+                    color: "oklch(0.75 0.18 25)",
+                    fontFamily: "'Sora', sans-serif",
+                  }}
+                >
+                  ← {t("game.pause.mainmenu", lang)}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Level Up Screen overlay */}
       <AnimatePresence>
@@ -730,6 +1095,20 @@ export function GameScreen({
           <GameOverScreen
             score={scoreRef.current}
             level={levelRef.current}
+            playerName={playerName}
+            onRestart={handleGameOver}
+            meteorsDodged={sessionStats.dodged}
+            hits={sessionStats.hits}
+            powerUpsCollected={sessionStats.powerUps}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Legend Screen (bölüm 50 tamamlama) */}
+      <AnimatePresence>
+        {showLegend && (
+          <LegendScreen
+            score={scoreRef.current}
             playerName={playerName}
             onRestart={handleGameOver}
           />

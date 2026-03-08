@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { t, useLanguage } from "@/game/i18n";
 import { Zap } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +15,7 @@ export function LevelUpScreen({
   score,
   onContinue,
 }: LevelUpScreenProps) {
+  const { lang } = useLanguage();
   const [countdown, setCountdown] = useState(3);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const calledRef = useRef(false);
@@ -59,19 +61,24 @@ export function LevelUpScreen({
     }
   }
 
-  const levelNames: Record<number, string> = {
-    2: "SICAK BAŞLANGIÇ",
-    3: "METEOR YAĞMURU",
-    4: "FIRTINA KAPISI",
-    5: "KARANLIk GÜÇ",
-    6: "KIZIL ZEMIN",
-    7: "ÖLÜM SARMALISI",
-    8: "YILDIZ KABISI",
-    9: "KAOS BOYUTU",
-    10: "METEOR CENNETİ",
-  };
+  const levelSubtitle =
+    t(`levelup.name.${level}`, lang) !== `levelup.name.${level}`
+      ? t(`levelup.name.${level}`, lang)
+      : t("levelup.name.default", lang);
 
-  const levelSubtitle = levelNames[level] ?? "SONRAKI BÖLÜM";
+  // Build countdown text based on language idioms
+  const countdownText = (() => {
+    const autoStart = t("levelup.auto_start", lang);
+    const starting = t("levelup.starting", lang);
+    if (countdown <= 0) return starting;
+    // Languages that put the number before "seconds" phrase
+    if (lang === "tr") return `${countdown} ${autoStart}`;
+    if (lang === "zh") return `${countdown} ${autoStart}`;
+    if (lang === "hi") return `${countdown} ${autoStart}`;
+    if (lang === "ru") return `${autoStart} ${countdown}с`;
+    // Default: "auto starts in Xs"
+    return `${autoStart} ${countdown}s`;
+  })();
 
   return (
     <div
@@ -137,13 +144,13 @@ export function LevelUpScreen({
               fontFamily: "'Sora', sans-serif",
             }}
           >
-            BÖLÜM
+            {t("levelup.label", lang)}
           </p>
           <h2
             className="text-4xl font-black mb-1 neon-text-gold"
             style={{ fontFamily: "'Orbitron', 'Sora', sans-serif" }}
           >
-            BÖLÜM {level}
+            {t("levelup.title", lang)} {level}
           </h2>
           <p
             className="text-sm tracking-widest opacity-70 mb-6"
@@ -171,7 +178,7 @@ export function LevelUpScreen({
             className="text-xs opacity-50 mb-1 tracking-widest"
             style={{ fontFamily: "'Sora', sans-serif" }}
           >
-            MEVCUT PUAN
+            {t("levelup.current_score", lang)}
           </p>
           <p
             className="text-3xl font-black neon-text-cyan"
@@ -193,9 +200,7 @@ export function LevelUpScreen({
             className="text-xs opacity-40 mb-1"
             style={{ fontFamily: "'Sora', sans-serif" }}
           >
-            {countdown > 0
-              ? `${countdown} saniyede otomatik başlar`
-              : "Başlıyor..."}
+            {countdownText}
           </p>
           <div className="flex justify-center gap-2 mt-2">
             {[3, 2, 1].map((n) => (
@@ -238,7 +243,7 @@ export function LevelUpScreen({
           >
             <span className="flex items-center gap-2">
               <Zap size={16} />
-              HEMEN BAŞLA
+              {t("levelup.btn_start", lang)}
             </span>
           </Button>
         </motion.div>

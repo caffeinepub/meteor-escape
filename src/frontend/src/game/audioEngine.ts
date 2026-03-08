@@ -3,18 +3,84 @@
  * No audio files needed.
  */
 
+const MUTE_STORAGE_KEY = "meteorescape_muted";
+const VOLUME_STORAGE_KEY = "meteorescape_volume";
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private bgNodes: AudioNode[] = [];
   private bgInterval: ReturnType<typeof setTimeout> | null = null;
   private bgPlaying = false;
   private masterGain: GainNode | null = null;
+  private _muted = false;
+  private _volume = 0.6; // 0.0 - 1.0
+
+  constructor() {
+    // Restore muted state and volume from localStorage
+    try {
+      this._muted = localStorage.getItem(MUTE_STORAGE_KEY) === "1";
+      const storedVol = localStorage.getItem(VOLUME_STORAGE_KEY);
+      if (storedVol !== null) {
+        const parsed = Number.parseFloat(storedVol);
+        if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+          this._volume = parsed;
+        }
+      }
+    } catch {
+      this._muted = false;
+    }
+  }
+
+  get isMuted(): boolean {
+    return this._muted;
+  }
+
+  get volume(): number {
+    return this._volume;
+  }
+
+  toggleMute(): boolean {
+    this._muted = !this._muted;
+    try {
+      localStorage.setItem(MUTE_STORAGE_KEY, this._muted ? "1" : "0");
+    } catch {
+      // ignore
+    }
+    if (this.masterGain) {
+      this.masterGain.gain.value = this._muted ? 0 : this._volume;
+    }
+    return this._muted;
+  }
+
+  setMute(muted: boolean): void {
+    this._muted = muted;
+    try {
+      localStorage.setItem(MUTE_STORAGE_KEY, muted ? "1" : "0");
+    } catch {
+      // ignore
+    }
+    if (this.masterGain) {
+      this.masterGain.gain.value = muted ? 0 : this._volume;
+    }
+  }
+
+  setVolume(vol: number): void {
+    this._volume = Math.max(0, Math.min(1, vol));
+    try {
+      localStorage.setItem(VOLUME_STORAGE_KEY, this._volume.toString());
+    } catch {
+      // ignore
+    }
+    if (this.masterGain && !this._muted) {
+      this.masterGain.gain.value = this._volume;
+    }
+  }
 
   private getCtx(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.6;
+      this.masterGain.gain.value = this._muted ? 0 : this._volume;
       this.masterGain.connect(this.ctx.destination);
     }
     if (this.ctx.state === "suspended") {
@@ -233,6 +299,58 @@ export class AudioEngine {
       osc.start(startTime);
       osc.stop(startTime + noteLen);
     });
+  }
+
+  /**
+   * Power-up pickup sound - bright ascending chime (distinct from level-up)
+   */
+  playPickupSound(type: "heart" | "coin"): void {
+    const ctx = this.getCtx();
+    const master = this.getMaster();
+    const now = ctx.currentTime;
+
+    if (type === "heart") {
+      // Heart: warm two-note chime going up
+      const notes = [523.25, 783.99]; // C5, G5
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t0 = now + i * 0.1;
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.25, t0);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(t0);
+        osc.stop(t0 + 0.2);
+      });
+    } else {
+      // Coin: short bright blip + shimmer
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.exponentialRampToValueAtTime(2400, now + 0.08);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(now);
+      osc.stop(now + 0.12);
+
+      // Shimmer
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = "sine";
+      osc2.frequency.value = 3200;
+      gain2.gain.setValueAtTime(0.08, now + 0.04);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc2.connect(gain2);
+      gain2.connect(master);
+      osc2.start(now + 0.04);
+      osc2.stop(now + 0.16);
+    }
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { updateHighScore } from "@/game/storage";
-import { RotateCcw, Star, Target, Trophy } from "lucide-react";
+import { t, useLanguage } from "@/game/i18n";
+import { updateBestLevel, updateHighScore } from "@/game/storage";
+import { RotateCcw, Shield, Star, Target, Trophy, Zap } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
@@ -9,6 +10,9 @@ interface GameOverScreenProps {
   level: number;
   playerName: string;
   onRestart: () => void;
+  meteorsDodged?: number;
+  hits?: number;
+  powerUpsCollected?: number;
 }
 
 export function GameOverScreen({
@@ -16,7 +20,11 @@ export function GameOverScreen({
   level,
   playerName,
   onRestart,
+  meteorsDodged = 0,
+  hits = 0,
+  powerUpsCollected = 0,
 }: GameOverScreenProps) {
+  const { lang } = useLanguage();
   const [highScore, setHighScore] = useState(0);
   const [isNewRecord, setIsNewRecord] = useState(false);
 
@@ -24,7 +32,8 @@ export function GameOverScreen({
     const newHighScore = updateHighScore(score);
     setHighScore(newHighScore);
     setIsNewRecord(score >= newHighScore && score > 0);
-  }, [score]);
+    updateBestLevel(level);
+  }, [score, level]);
 
   return (
     <div
@@ -84,7 +93,7 @@ export function GameOverScreen({
               textShadow: "0 0 20px oklch(0.65 0.25 25 / 0.7)",
             }}
           >
-            GAME OVER
+            {t("gameover.title", lang)}
           </h2>
           {playerName && (
             <p
@@ -120,7 +129,7 @@ export function GameOverScreen({
               className="text-xs opacity-50 mb-1 tracking-wider"
               style={{ fontFamily: "'Sora', sans-serif" }}
             >
-              SKOR
+              {t("gameover.score_label", lang)}
             </p>
             <p
               className="text-2xl font-black neon-text-cyan"
@@ -147,7 +156,7 @@ export function GameOverScreen({
               className="text-xs opacity-50 mb-1 tracking-wider"
               style={{ fontFamily: "'Sora', sans-serif" }}
             >
-              BÖLÜM
+              {t("gameover.level_label", lang)}
             </p>
             <p
               className="text-2xl font-black neon-text-gold"
@@ -180,7 +189,7 @@ export function GameOverScreen({
                 className="text-sm opacity-60"
                 style={{ fontFamily: "'Sora', sans-serif" }}
               >
-                EN YÜKSEK SKOR
+                {t("gameover.highscore_label", lang)}
               </span>
             </div>
             <span
@@ -207,10 +216,103 @@ export function GameOverScreen({
                   fontFamily: "'Sora', sans-serif",
                 }}
               >
-                🏆 YENİ REKOR!
+                {t("gameover.new_record", lang)}
               </span>
             </motion.div>
           )}
+        </motion.div>
+
+        {/* Session stats */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.55 }}
+          className="grid grid-cols-3 gap-2 mb-5"
+        >
+          <div
+            className="p-2 rounded-xl text-center"
+            style={{
+              background: "oklch(0.10 0.025 265 / 0.5)",
+              border: "1px solid oklch(0.55 0.20 160 / 0.3)",
+            }}
+          >
+            <Target
+              size={12}
+              className="mx-auto mb-1 opacity-60"
+              style={{ color: "oklch(0.72 0.18 160)" }}
+            />
+            <p
+              className="text-xs opacity-40 mb-0.5"
+              style={{ fontFamily: "'Sora', sans-serif", fontSize: "9px" }}
+            >
+              DODGE
+            </p>
+            <p
+              className="text-base font-black"
+              style={{
+                color: "oklch(0.72 0.18 160)",
+                fontFamily: "'Orbitron', monospace",
+              }}
+            >
+              {meteorsDodged}
+            </p>
+          </div>
+          <div
+            className="p-2 rounded-xl text-center"
+            style={{
+              background: "oklch(0.10 0.025 265 / 0.5)",
+              border: "1px solid oklch(0.60 0.22 25 / 0.3)",
+            }}
+          >
+            <Shield
+              size={12}
+              className="mx-auto mb-1 opacity-60"
+              style={{ color: "oklch(0.72 0.20 25)" }}
+            />
+            <p
+              className="text-xs opacity-40 mb-0.5"
+              style={{ fontFamily: "'Sora', sans-serif", fontSize: "9px" }}
+            >
+              HIT
+            </p>
+            <p
+              className="text-base font-black"
+              style={{
+                color: "oklch(0.72 0.20 25)",
+                fontFamily: "'Orbitron', monospace",
+              }}
+            >
+              {hits}
+            </p>
+          </div>
+          <div
+            className="p-2 rounded-xl text-center"
+            style={{
+              background: "oklch(0.10 0.025 265 / 0.5)",
+              border: "1px solid oklch(0.82 0.20 80 / 0.3)",
+            }}
+          >
+            <Zap
+              size={12}
+              className="mx-auto mb-1 opacity-60"
+              style={{ color: "oklch(0.82 0.20 80)" }}
+            />
+            <p
+              className="text-xs opacity-40 mb-0.5"
+              style={{ fontFamily: "'Sora', sans-serif", fontSize: "9px" }}
+            >
+              BONUS
+            </p>
+            <p
+              className="text-base font-black"
+              style={{
+                color: "oklch(0.82 0.20 80)",
+                fontFamily: "'Orbitron', monospace",
+              }}
+            >
+              {powerUpsCollected}
+            </p>
+          </div>
         </motion.div>
 
         {/* Restart button */}
@@ -236,7 +338,7 @@ export function GameOverScreen({
           >
             <span className="flex items-center gap-2">
               <RotateCcw size={16} />
-              YENİDEN OYNA
+              {t("gameover.btn_restart", lang)}
             </span>
           </Button>
         </motion.div>

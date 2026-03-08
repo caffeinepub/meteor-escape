@@ -1,9 +1,16 @@
+import { LanguageSelector } from "@/components/LanguageSelector";
 import { StarField } from "@/components/StarField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getAudioEngine } from "@/game/audioEngine";
-import { getHighScore, getPlayerName, setPlayerName } from "@/game/storage";
-import { Camera, RefreshCw, Star, Trophy, Zap } from "lucide-react";
+import { t, useLanguage } from "@/game/i18n";
+import {
+  getBestLevel,
+  getHighScore,
+  getPlayerName,
+  setPlayerName,
+} from "@/game/storage";
+import { Camera, RefreshCw, Star, Swords, Trophy, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -12,8 +19,10 @@ interface StartScreenProps {
 }
 
 export function StartScreen({ onStart }: StartScreenProps) {
+  const { lang } = useLanguage();
   const [playerName, setPlayerNameState] = useState(() => getPlayerName());
   const [highScore] = useState(() => getHighScore());
+  const [bestLevel] = useState(() => getBestLevel());
   const [cameraStatus, setCameraStatus] = useState<
     "checking" | "ok" | "denied" | "error"
   >("checking");
@@ -85,6 +94,9 @@ export function StartScreen({ onStart }: StartScreenProps) {
       <StarField />
       <div className="scanline-overlay" />
 
+      {/* Language selector top-right */}
+      <LanguageSelector className="absolute top-4 right-4 z-50" />
+
       {/* Title */}
       <motion.div
         initial={{ opacity: 0, y: -40 }}
@@ -112,7 +124,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
             letterSpacing: "-0.02em",
           }}
         >
-          METEOR
+          {t("start.title1", lang)}
         </h1>
         <h1
           className="text-5xl md:text-7xl font-black tracking-tight neon-text-gold"
@@ -121,14 +133,14 @@ export function StartScreen({ onStart }: StartScreenProps) {
             letterSpacing: "-0.02em",
           }}
         >
-          ESCAPE
+          {t("start.title2", lang)}
         </h1>
 
         <p
           className="text-sm mt-3 opacity-60 tracking-widest text-foreground"
           style={{ fontFamily: "'Sora', sans-serif" }}
         >
-          GÖVDE HAREKETİYLE METEORları DODGE ET
+          {t("start.subtitle", lang)}
         </p>
       </motion.div>
 
@@ -147,33 +159,64 @@ export function StartScreen({ onStart }: StartScreenProps) {
             backdropFilter: "blur(20px)",
           }}
         >
-          {/* High score */}
-          {highScore > 0 && (
+          {/* High score + Best level */}
+          {(highScore > 0 || bestLevel > 0) && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
-              className="flex items-center gap-2 mb-5 p-3 rounded-xl"
-              style={{
-                background: "oklch(0.12 0.03 80 / 0.3)",
-                border: "1px solid oklch(0.82 0.20 80 / 0.3)",
-              }}
+              className="flex gap-2 mb-5"
             >
-              <Trophy size={18} className="neon-text-gold flex-shrink-0" />
-              <div>
-                <span
-                  className="text-xs opacity-50 block"
-                  style={{ fontFamily: "'Sora', sans-serif" }}
+              {highScore > 0 && (
+                <div
+                  className="flex items-center gap-2 flex-1 p-3 rounded-xl"
+                  style={{
+                    background: "oklch(0.12 0.03 80 / 0.3)",
+                    border: "1px solid oklch(0.82 0.20 80 / 0.3)",
+                  }}
                 >
-                  EN YÜKSEK SKOR
-                </span>
-                <span
-                  className="text-2xl font-bold neon-text-gold"
-                  style={{ fontFamily: "'Orbitron', 'Sora', monospace" }}
+                  <Trophy size={16} className="neon-text-gold flex-shrink-0" />
+                  <div>
+                    <span
+                      className="text-xs opacity-50 block"
+                      style={{ fontFamily: "'Sora', sans-serif" }}
+                    >
+                      {t("start.highscore_label", lang)}
+                    </span>
+                    <span
+                      className="text-xl font-bold neon-text-gold"
+                      style={{ fontFamily: "'Orbitron', 'Sora', monospace" }}
+                    >
+                      {highScore.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {bestLevel > 0 && (
+                <div
+                  className="flex items-center gap-2 flex-1 p-3 rounded-xl"
+                  style={{
+                    background: "oklch(0.12 0.03 195 / 0.3)",
+                    border: "1px solid oklch(0.78 0.22 195 / 0.3)",
+                  }}
                 >
-                  {highScore.toLocaleString()}
-                </span>
-              </div>
+                  <Swords size={16} className="neon-text-cyan flex-shrink-0" />
+                  <div>
+                    <span
+                      className="text-xs opacity-50 block"
+                      style={{ fontFamily: "'Sora', sans-serif" }}
+                    >
+                      {t("start.bestlevel_label", lang)}
+                    </span>
+                    <span
+                      className="text-xl font-bold neon-text-cyan"
+                      style={{ fontFamily: "'Orbitron', 'Sora', monospace" }}
+                    >
+                      {bestLevel}
+                    </span>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -187,7 +230,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
                 fontFamily: "'Sora', sans-serif",
               }}
             >
-              OYUNCU İSMİ
+              {t("start.name_label", lang)}
             </label>
             <Input
               id="player-name"
@@ -197,7 +240,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canStart) handleStart();
               }}
-              placeholder="İsminizi girin..."
+              placeholder={t("start.name_placeholder", lang)}
               maxLength={20}
               className="text-center text-lg font-bold tracking-wide"
               style={{
@@ -227,7 +270,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
                     className="opacity-60"
                     style={{ fontFamily: "'Sora', sans-serif" }}
                   >
-                    Kamera kontrol ediliyor...
+                    {t("start.camera_checking", lang)}
                   </span>
                 </motion.div>
               )}
@@ -247,7 +290,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
                 >
                   <Camera size={16} />
                   <span style={{ fontFamily: "'Sora', sans-serif" }}>
-                    Kamera hazır ✓
+                    {t("start.camera_ok", lang)}
                   </span>
                 </motion.div>
               )}
@@ -271,8 +314,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
                       fontFamily: "'Sora', sans-serif",
                     }}
                   >
-                    Meteor Escape requires camera access to play. Please enable
-                    camera permission.
+                    {t("start.camera_error", lang)}
                   </p>
                   <Button
                     data-ocid="start.retry_camera_button"
@@ -287,7 +329,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
                     }}
                   >
                     <RefreshCw size={14} />
-                    Retry Camera
+                    {t("start.retry_camera", lang)}
                   </Button>
                 </motion.div>
               )}
@@ -322,12 +364,12 @@ export function StartScreen({ onStart }: StartScreenProps) {
               {isStarting ? (
                 <span className="flex items-center gap-2">
                   <RefreshCw size={20} className="animate-spin" />
-                  BAŞLATILIYOR...
+                  {t("start.btn_starting", lang)}
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <Zap size={20} />
-                  OYUNA BAŞLA
+                  {t("start.btn_start", lang)}
                 </span>
               )}
             </Button>
@@ -341,12 +383,10 @@ export function StartScreen({ onStart }: StartScreenProps) {
             className="mt-5 text-center"
           >
             <p
-              className="text-xs opacity-40 leading-relaxed"
+              className="text-xs opacity-40 leading-relaxed whitespace-pre-line"
               style={{ fontFamily: "'Sora', sans-serif" }}
             >
-              Kameranın önünde dur ve gövdeni hareket ettirerek
-              <br />
-              düşen meteorlardan kaç! 3 canın var.
+              {t("start.instructions", lang)}
             </p>
           </motion.div>
         </div>
@@ -356,9 +396,9 @@ export function StartScreen({ onStart }: StartScreenProps) {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.9 }}
-          className="flex justify-center gap-3 mt-5 flex-wrap"
+          className="flex justify-center gap-2 mt-5 flex-wrap"
         >
-          {[1, 2, 3].map((l) => (
+          {[1, 5, 10, 25].map((l) => (
             <div
               key={l}
               className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs opacity-50"
@@ -369,7 +409,7 @@ export function StartScreen({ onStart }: StartScreenProps) {
               }}
             >
               <Star size={10} />
-              BÖLÜM {l}
+              {t("start.level_label", lang)} {l}
             </div>
           ))}
           <div
@@ -380,7 +420,67 @@ export function StartScreen({ onStart }: StartScreenProps) {
               fontFamily: "'Sora', sans-serif",
             }}
           >
-            ... BÖLÜM 10
+            ... {t("start.level_label", lang)} 50
+          </div>
+        </motion.div>
+
+        {/* Auto Framing guide */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.1 }}
+          className="mt-4 flex justify-center"
+        >
+          <div
+            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs"
+            style={{
+              background: "oklch(0.10 0.025 265 / 0.6)",
+              border: "1px solid oklch(0.78 0.22 195 / 0.2)",
+              fontFamily: "'Sora', sans-serif",
+            }}
+          >
+            <div className="flex-shrink-0 relative w-7 h-9">
+              <svg
+                role="img"
+                aria-label="player silhouette"
+                viewBox="0 0 24 32"
+                width="24"
+                height="28"
+                style={{ color: "oklch(0.78 0.22 195)", opacity: 0.55 }}
+              >
+                <circle cx="12" cy="5" r="4" fill="currentColor" />
+                <rect
+                  x="7"
+                  y="10"
+                  width="10"
+                  height="12"
+                  rx="3"
+                  fill="currentColor"
+                />
+                <rect
+                  x="6"
+                  y="23"
+                  width="4"
+                  height="8"
+                  rx="2"
+                  fill="currentColor"
+                />
+                <rect
+                  x="14"
+                  y="23"
+                  width="4"
+                  height="8"
+                  rx="2"
+                  fill="currentColor"
+                />
+              </svg>
+            </div>
+            <span
+              className="opacity-50"
+              style={{ color: "oklch(0.82 0.12 200)" }}
+            >
+              {t("start.framing_tip", lang)}
+            </span>
           </div>
         </motion.div>
       </motion.div>
