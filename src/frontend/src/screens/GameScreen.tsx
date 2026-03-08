@@ -72,7 +72,6 @@ export function GameScreen({
   const { themeId } = useTheme();
   const theme = getThemeConfig(themeId);
 
-  // Keep lang/theme accessible from canvas loop without re-creating callbacks
   const langRef = useRef(lang);
   langRef.current = lang;
   const themeRef = useRef(theme);
@@ -105,27 +104,22 @@ export function GameScreen({
     powerUps: 0,
   });
 
-  // Expose final score/level to GameOver/Legend buttons
   const finalScoreRef = useRef(initialScore);
   const finalLevelRef = useRef(initialLevel);
-
-  // Pause state accessible from engine loop
   const isPausedRef = useRef(false);
-
-  // Touch/pointer fallback
   const touchModeRef = useRef(false);
   const touchBodyRef = useRef<BodyCenter | null>(null);
-
-  // Score popup setter ref -- so the effect can call it without being a dependency
   const setScorePopupsRef = useRef(setScorePopups);
   setScorePopupsRef.current = setScorePopups;
 
+  // ---- Engine refs (defined BEFORE useEffect so effect can write to them) ----
+  const pauseFnRef = useRef<() => void>(() => {});
+  const resumeFnRef = useRef<() => void>(() => {});
+  const continueAfterLevelFnRef = useRef<() => void>(() => {});
+
   // ===================== MAIN GAME ENGINE EFFECT =====================
-  // Everything runs inside a single effect so closures are never stale.
-  // We use a local `active` flag instead of a ref shared across renders.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional single-mount game engine
   useEffect(() => {
-    // Score popups helper (defined inside effect so it's always fresh)
     function addScorePopup(
       x: number,
       y: number,
@@ -142,14 +136,14 @@ export function GameScreen({
       }, 1200);
     }
 
-    // --- Local mutable state (NOT React state) ---
-    let active = true; // set false on cleanup
+    // --- Local mutable state ---
+    let active = true;
     let paused = false;
     let animFrame: number | null = null;
-    let spawnTimer: ReturnType<typeof setTimeout> | null = null;
-    let powerUpTimer: ReturnType<typeof setTimeout> | null = null;
-    let invincibleTimer: ReturnType<typeof setTimeout> | null = null;
-    let hitTimer: ReturnType<typeof setTimeout> | null = null;
+    let spawnTimerId: ReturnType<typeof setTimeout> | null = null;
+    let powerUpTimerId: ReturnType<typeof setTimeout> | null = null;
+    let invincibleTimerId: ReturnType<typeof setTimeout> | null = null;
+    let hitTimerId: ReturnType<typeof setTimeout> | null = null;
     const countdownTimers: ReturnType<typeof setTimeout>[] = [];
 
     let score = initialScore;
@@ -166,12 +160,11 @@ export function GameScreen({
     let statsHits = 0;
     let statsPowerUps = 0;
 
-    // MediaPipe handles
     let poseHandle: MediaPipePose | null = null;
     let cameraHandle: MediaPipeCamera | null = null;
     let streamHandle: MediaStream | null = null;
 
-    // --- Canvas / resize ---
+    // --- Canvas resize ---
     function resizeCanvas() {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -194,12 +187,15 @@ export function GameScreen({
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
-    // --- Spawn ---
+    // --- Spawn scheduling ---
     function scheduleSpawn() {
-      if (spawnTimer) clearTimeout(spawnTimer);
+      if (spawnTimerId) {
+        clearTimeout(spawnTimerId);
+        spawnTimerId = null;
+      }
       if (!active || paused) return;
       const cfg = getLevelForScore(score);
-      spawnTimer = setTimeout(() => {
+      spawnTimerId = setTimeout(() => {
         if (!active || paused) return;
         const canvas = canvasRef.current;
         if (canvas && meteors.length < cfg.maxMeteors) {
@@ -213,10 +209,13 @@ export function GameScreen({
     }
 
     function schedulePowerUpSpawn() {
-      if (powerUpTimer) clearTimeout(powerUpTimer);
+      if (powerUpTimerId) {
+        clearTimeout(powerUpTimerId);
+        powerUpTimerId = null;
+      }
       if (!active || paused) return;
       const interval = getPowerUpSpawnInterval(level);
-      powerUpTimer = setTimeout(() => {
+      powerUpTimerId = setTimeout(() => {
         if (!active || paused) return;
         const canvas = canvasRef.current;
         if (canvas) {
@@ -228,9 +227,13 @@ export function GameScreen({
       }, interval);
     }
 
-    // --- End game helpers ---
+    // --- End-game helpers ---
     function triggerGameOver() {
       active = false;
+      if (animFrame !== null) {
+        cancelAnimationFrame(animFrame);
+        animFrame = null;
+      }
       getAudioEngine().stopBackgroundMusic();
       getAudioEngine().playGameOverSound();
       finalScoreRef.current = score;
@@ -245,6 +248,10 @@ export function GameScreen({
 
     function triggerLegend() {
       active = false;
+      if (animFrame !== null) {
+        cancelAnimationFrame(animFrame);
+        animFrame = null;
+      }
       getAudioEngine().stopBackgroundMusic();
       getAudioEngine().playLevelUpSound();
       finalScoreRef.current = score;
@@ -254,6 +261,10 @@ export function GameScreen({
 
     function triggerLevelUp(newLevel: number, newScore: number) {
       active = false;
+      if (animFrame !== null) {
+        cancelAnimationFrame(animFrame);
+        animFrame = null;
+      }
       meteors = [];
       powerUps = [];
       getAudioEngine().playLevelUpSound();
@@ -289,6 +300,8 @@ export function GameScreen({
       if (paused) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Draw badge even when paused
+        drawPlayerBadge(ctx, center, playerNameRef.current, false, false);
         animFrame = requestAnimationFrame(gameLoop);
         return;
       }
@@ -333,7 +346,6 @@ export function GameScreen({
           statsPowerUps += 1;
           if (updated.type === "heart") {
             lives = Math.min(lives + 1, MAX_LIVES);
-            setSessionStats((s) => ({ ...s })); // trigger re-eval via state
             addScorePopup(updated.x, updated.y, 1, "heart");
           } else {
             scoreGained += POWERUP_BONUS_SCORE;
@@ -351,7 +363,6 @@ export function GameScreen({
       if (scoreGained > 0) {
         score += scoreGained;
         finalScoreRef.current = score;
-        // Sync HUD
         const newLevelCfg = getLevelForScore(score);
         if (newLevelCfg.level > level) {
           level = newLevelCfg.level;
@@ -374,13 +385,13 @@ export function GameScreen({
         isHit = true;
         getAudioEngine().playHitSound();
 
-        if (hitTimer) clearTimeout(hitTimer);
-        hitTimer = setTimeout(() => {
+        if (hitTimerId) clearTimeout(hitTimerId);
+        hitTimerId = setTimeout(() => {
           isHit = false;
         }, 300);
 
-        if (invincibleTimer) clearTimeout(invincibleTimer);
-        invincibleTimer = setTimeout(() => {
+        if (invincibleTimerId) clearTimeout(invincibleTimerId);
+        invincibleTimerId = setTimeout(() => {
           isInvincible = false;
           isHit = false;
         }, INVINCIBILITY_DURATION);
@@ -411,6 +422,17 @@ export function GameScreen({
       animFrame = requestAnimationFrame(gameLoop);
     }
 
+    // --- Start the game loop + spawners ---
+    function startGame() {
+      if (!active) return;
+      getAudioEngine().startBackgroundMusic();
+      // Start game loop
+      animFrame = requestAnimationFrame(gameLoop);
+      // Start spawners with a tiny stagger so first meteor appears quickly
+      scheduleSpawn();
+      schedulePowerUpSpawn();
+    }
+
     // --- Countdown then start ---
     function startCountdown() {
       setCountdown(3);
@@ -426,15 +448,56 @@ export function GameScreen({
           if (!active) return;
           setCountdown(step.value);
           if (step.value === null) {
-            getAudioEngine().startBackgroundMusic();
-            gameLoop();
-            scheduleSpawn();
-            schedulePowerUpSpawn();
+            startGame();
           }
         }, step.delay);
         countdownTimers.push(tid);
       }
     }
+
+    // --- Wire up pause/resume/continue refs BEFORE any async work ---
+    pauseFnRef.current = () => {
+      if (!paused) {
+        paused = true;
+        isPausedRef.current = true;
+        setIsPaused(true);
+        setShowPauseMenu(true);
+        getAudioEngine().stopBackgroundMusic();
+        if (spawnTimerId) {
+          clearTimeout(spawnTimerId);
+          spawnTimerId = null;
+        }
+        if (powerUpTimerId) {
+          clearTimeout(powerUpTimerId);
+          powerUpTimerId = null;
+        }
+      }
+    };
+
+    resumeFnRef.current = () => {
+      if (paused) {
+        paused = false;
+        isPausedRef.current = false;
+        setIsPaused(false);
+        setShowPauseMenu(false);
+        getAudioEngine().startBackgroundMusic();
+        scheduleSpawn();
+        schedulePowerUpSpawn();
+      }
+    };
+
+    continueAfterLevelFnRef.current = () => {
+      active = true;
+      paused = false;
+      isPausedRef.current = false;
+      meteors = [];
+      powerUps = [];
+      lives = MAX_LIVES;
+      score = finalScoreRef.current;
+      level = finalLevelRef.current;
+      setShowLevelUp(false);
+      startCountdown();
+    };
 
     // --- MediaPipe init ---
     async function initMediaPipe() {
@@ -446,7 +509,7 @@ export function GameScreen({
         attempts++;
       }
 
-      if (!active) return; // unmounted during wait
+      if (!active) return;
 
       if (!window.Pose) {
         touchModeRef.current = true;
@@ -528,7 +591,7 @@ export function GameScreen({
               },
             });
             if (!active) {
-              for (const t of stream.getTracks()) t.stop();
+              for (const tr of stream.getTracks()) tr.stop();
               return;
             }
             streamHandle = stream;
@@ -563,61 +626,26 @@ export function GameScreen({
       }
     }
 
-    // --- Boot sequence ---
+    // --- Boot ---
     initMediaPipe().then(() => {
       if (active) startCountdown();
     });
-
-    // ---- Expose resume/pause so event handlers can call them ----
-    // We expose them via refs so the JSX event handlers below can use them.
-    pauseResumeRef.current = {
-      pause: () => {
-        if (!paused) {
-          paused = true;
-          isPausedRef.current = true;
-          setIsPaused(true);
-          setShowPauseMenu(true);
-          getAudioEngine().stopBackgroundMusic();
-          if (spawnTimer) clearTimeout(spawnTimer);
-          if (powerUpTimer) clearTimeout(powerUpTimer);
-        }
-      },
-      resume: () => {
-        if (paused) {
-          paused = false;
-          isPausedRef.current = false;
-          setIsPaused(false);
-          setShowPauseMenu(false);
-          getAudioEngine().startBackgroundMusic();
-          scheduleSpawn();
-          schedulePowerUpSpawn();
-        }
-      },
-      continueAfterLevel: () => {
-        // Called from LevelUpScreen continue button
-        active = true;
-        paused = false;
-        isPausedRef.current = false;
-        meteors = [];
-        powerUps = [];
-        lives = MAX_LIVES;
-        score = finalScoreRef.current;
-        level = finalLevelRef.current;
-        setShowLevelUp(false);
-        startCountdown();
-      },
-    };
 
     // --- Cleanup ---
     return () => {
       active = false;
 
+      // Neutralise the refs so stale calls are no-ops
+      pauseFnRef.current = () => {};
+      resumeFnRef.current = () => {};
+      continueAfterLevelFnRef.current = () => {};
+
       for (const tid of countdownTimers) clearTimeout(tid);
       if (animFrame !== null) cancelAnimationFrame(animFrame);
-      if (spawnTimer) clearTimeout(spawnTimer);
-      if (powerUpTimer) clearTimeout(powerUpTimer);
-      if (invincibleTimer) clearTimeout(invincibleTimer);
-      if (hitTimer) clearTimeout(hitTimer);
+      if (spawnTimerId) clearTimeout(spawnTimerId);
+      if (powerUpTimerId) clearTimeout(powerUpTimerId);
+      if (invincibleTimerId) clearTimeout(invincibleTimerId);
+      if (hitTimerId) clearTimeout(hitTimerId);
 
       window.removeEventListener("resize", resizeCanvas);
 
@@ -636,20 +664,9 @@ export function GameScreen({
 
       getAudioEngine().stopBackgroundMusic();
     };
-  }, []); // single mount, intentionally empty deps
+  }, []); // single mount
 
-  // Ref to bridge JSX event handlers -> engine functions defined inside effect
-  const pauseResumeRef = useRef<{
-    pause: () => void;
-    resume: () => void;
-    continueAfterLevel: () => void;
-  }>({
-    pause: () => {},
-    resume: () => {},
-    continueAfterLevel: () => {},
-  });
-
-  // ===================== TOUCH / MOUSE MOVE =====================
+  // ===================== TOUCH / POINTER =====================
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!touchModeRef.current) return;
     const canvas = canvasRef.current;
@@ -664,14 +681,14 @@ export function GameScreen({
   // ===================== PAUSE TOGGLE =====================
   function togglePause() {
     if (isPausedRef.current) {
-      pauseResumeRef.current.resume();
+      resumeFnRef.current();
     } else {
-      pauseResumeRef.current.pause();
+      pauseFnRef.current();
     }
   }
 
   function handleResume() {
-    pauseResumeRef.current.resume();
+    resumeFnRef.current();
   }
 
   function handleToggleMute() {
@@ -698,7 +715,7 @@ export function GameScreen({
   }
 
   function handleLevelUpContinue() {
-    pauseResumeRef.current.continueAfterLevel();
+    continueAfterLevelFnRef.current();
   }
 
   function handleGameOver() {
