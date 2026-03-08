@@ -37,7 +37,7 @@ import type {
   PowerUp,
 } from "@/game/types";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GameOverScreen } from "./GameOverScreen";
 import { LegendScreen } from "./LegendScreen";
 import { LevelUpScreen } from "./LevelUpScreen";
@@ -71,56 +71,22 @@ export function GameScreen({
   const { lang } = useLanguage();
   const { themeId } = useTheme();
   const theme = getThemeConfig(themeId);
+
+  // Keep lang/theme accessible from canvas loop without re-creating callbacks
   const langRef = useRef(lang);
   langRef.current = lang;
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  const playerNameRef = useRef(playerName);
+  playerNameRef.current = playerName;
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animFrameRef = useRef<number | null>(null);
-  const poseRef = useRef<MediaPipePose | null>(null);
-  const cameraRef = useRef<MediaPipeCamera | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
 
-  // Game state (mutable refs for game loop performance)
-  const scoreRef = useRef(initialScore);
-  const livesRef = useRef(initialLives);
-  const levelRef = useRef(initialLevel);
-  const meteorsRef = useRef<Meteor[]>([]);
-  const bodyCenterRef = useRef<BodyCenter | null>(null);
-  const smoothedBodyRef = useRef<BodyCenter | null>(null);
-  const isInvincibleRef = useRef(false);
-  const invincibleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isHitRef = useRef(false);
-  const hitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const spawnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const powerUpSpawnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const countdownTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const isPausedRef = useRef(false);
-  const gameActiveRef = useRef(true);
-  const powerUpsRef = useRef<PowerUp[]>([]);
-  // Touch/mouse fallback mode
-  const touchModeRef = useRef(false);
-  const touchBodyRef = useRef<BodyCenter | null>(null);
-  // Session stats
-  const statsMeteorsDodgedRef = useRef(0);
-  const statsHitsRef = useRef(0);
-  const statsPowerUpsRef = useRef(0);
-
-  // React state (for UI rendering)
-  const [_score, setScore] = useState(initialScore);
-  const [_lives, setLives] = useState(initialLives);
-  const [_currentLevel, setCurrentLevel] = useState(initialLevel);
+  // ---- React state (UI only) ----
   const [isPaused, setIsPaused] = useState(false);
   const [showPauseMenu, setShowPauseMenu] = useState(false);
   const [showLevelUp, setShowLevelUp] = useState(false);
-  const [sessionStats, setSessionStats] = useState({
-    dodged: 0,
-    hits: 0,
-    powerUps: 0,
-  });
   const [levelUpData, setLevelUpData] = useState({
     level: initialLevel,
     score: initialScore,
@@ -133,558 +99,555 @@ export function GameScreen({
   const [volume, setVolumeState] = useState(() => getAudioEngine().volume);
   const [countdown, setCountdown] = useState<CountdownValue>(3);
   const [touchMode, setTouchMode] = useState(false);
+  const [sessionStats, setSessionStats] = useState({
+    dodged: 0,
+    hits: 0,
+    powerUps: 0,
+  });
 
-  // Score popup helper
-  const addScorePopup = useCallback(
-    (
+  // Expose final score/level to GameOver/Legend buttons
+  const finalScoreRef = useRef(initialScore);
+  const finalLevelRef = useRef(initialLevel);
+
+  // Pause state accessible from engine loop
+  const isPausedRef = useRef(false);
+
+  // Touch/pointer fallback
+  const touchModeRef = useRef(false);
+  const touchBodyRef = useRef<BodyCenter | null>(null);
+
+  // Score popup setter ref -- so the effect can call it without being a dependency
+  const setScorePopupsRef = useRef(setScorePopups);
+  setScorePopupsRef.current = setScorePopups;
+
+  // ===================== MAIN GAME ENGINE EFFECT =====================
+  // Everything runs inside a single effect so closures are never stale.
+  // We use a local `active` flag instead of a ref shared across renders.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional single-mount game engine
+  useEffect(() => {
+    // Score popups helper (defined inside effect so it's always fresh)
+    function addScorePopup(
       x: number,
       y: number,
       value: number,
       type: "score" | "coin" | "heart" = "score",
-    ) => {
+    ) {
       const id = Date.now() + Math.random();
-      setScorePopups((prev) => [
+      setScorePopupsRef.current((prev) => [
         ...prev.slice(-8),
         { id, x, y, value, type, timestamp: Date.now() },
       ]);
       setTimeout(() => {
-        setScorePopups((prev) => prev.filter((p) => p.id !== id));
+        setScorePopupsRef.current((prev) => prev.filter((p) => p.id !== id));
       }, 1200);
-    },
-    [],
-  );
-
-  // ===================== MEDIAPIPE SETUP =====================
-  const initMediaPipe = useCallback(async () => {
-    if (!videoRef.current) return;
-
-    // Wait for MediaPipe to be available
-    let attempts = 0;
-    while (!window.Pose && attempts < 30) {
-      await new Promise((r) => setTimeout(r, 200));
-      attempts++;
     }
 
-    if (!window.Pose) {
-      console.warn("MediaPipe Pose not available -- enabling touch mode");
-      touchModeRef.current = true;
-      setTouchMode(true);
-      setMediaPipeReady(true);
-      return;
+    // --- Local mutable state (NOT React state) ---
+    let active = true; // set false on cleanup
+    let paused = false;
+    let animFrame: number | null = null;
+    let spawnTimer: ReturnType<typeof setTimeout> | null = null;
+    let powerUpTimer: ReturnType<typeof setTimeout> | null = null;
+    let invincibleTimer: ReturnType<typeof setTimeout> | null = null;
+    let hitTimer: ReturnType<typeof setTimeout> | null = null;
+    const countdownTimers: ReturnType<typeof setTimeout>[] = [];
+
+    let score = initialScore;
+    let lives = initialLives;
+    let level = initialLevel;
+    let meteors: Meteor[] = [];
+    let powerUps: PowerUp[] = [];
+    let isInvincible = false;
+    let isHit = false;
+    let bodyCenter: BodyCenter | null = null;
+    let smoothedBody: BodyCenter | null = null;
+
+    let statsDodged = 0;
+    let statsHits = 0;
+    let statsPowerUps = 0;
+
+    // MediaPipe handles
+    let poseHandle: MediaPipePose | null = null;
+    let cameraHandle: MediaPipeCamera | null = null;
+    let streamHandle: MediaStream | null = null;
+
+    // --- Canvas / resize ---
+    function resizeCanvas() {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      if (!bodyCenter) {
+        bodyCenter = {
+          x: window.innerWidth / 2,
+          y: window.innerHeight * 0.55,
+        };
+      }
+      if (!touchBodyRef.current) {
+        touchBodyRef.current = {
+          x: window.innerWidth / 2,
+          y: window.innerHeight * 0.5,
+        };
+      }
     }
 
-    try {
-      const pose = new window.Pose({
-        locateFile: (file: string) =>
-          `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-      });
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
 
-      pose.setOptions({
-        modelComplexity: 1,
-        smoothLandmarks: true,
-        enableSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
-
-      pose.onResults((results: PoseResults) => {
-        if (!results.poseLandmarks || !canvasRef.current) return;
-
+    // --- Spawn ---
+    function scheduleSpawn() {
+      if (spawnTimer) clearTimeout(spawnTimer);
+      if (!active || paused) return;
+      const cfg = getLevelForScore(score);
+      spawnTimer = setTimeout(() => {
+        if (!active || paused) return;
         const canvas = canvasRef.current;
-        const lm = results.poseLandmarks;
-
-        // Landmarks: 11=left shoulder, 12=right shoulder, 23=left hip, 24=right hip
-        const ls = lm[11];
-        const rs = lm[12];
-        const lh = lm[23];
-        const rh = lm[24];
-
-        if (!ls || !rs || !lh || !rh) return;
-
-        // Mirror X: MediaPipe gives 0-1 relative coords; video is mirrored so flip X
-        const shoulderMidX = (1 - (ls.x + rs.x) / 2) * canvas.width;
-        const shoulderMidY = ((ls.y + rs.y) / 2) * canvas.height;
-        const hipMidX = (1 - (lh.x + rh.x) / 2) * canvas.width;
-        const hipMidY = ((lh.y + rh.y) / 2) * canvas.height;
-
-        // Chest area: 70% shoulder + 30% hip (upper torso)
-        const rawX = shoulderMidX * 0.7 + hipMidX * 0.3;
-        const rawY = shoulderMidY * 0.7 + hipMidY * 0.3;
-
-        // Exponential moving average smoothing (alpha = 0.4)
-        if (!smoothedBodyRef.current) {
-          smoothedBodyRef.current = { x: rawX, y: rawY };
-        } else {
-          smoothedBodyRef.current = {
-            x:
-              SMOOTHING_ALPHA * rawX +
-              (1 - SMOOTHING_ALPHA) * smoothedBodyRef.current.x,
-            y:
-              SMOOTHING_ALPHA * rawY +
-              (1 - SMOOTHING_ALPHA) * smoothedBodyRef.current.y,
-          };
+        if (canvas && meteors.length < cfg.maxMeteors) {
+          meteors = [
+            ...meteors,
+            createMeteor(canvas.width, cfg.speedMin, cfg.speedMax),
+          ];
         }
+        scheduleSpawn();
+      }, cfg.spawnMs);
+    }
 
-        bodyCenterRef.current = smoothedBodyRef.current;
+    function schedulePowerUpSpawn() {
+      if (powerUpTimer) clearTimeout(powerUpTimer);
+      if (!active || paused) return;
+      const interval = getPowerUpSpawnInterval(level);
+      powerUpTimer = setTimeout(() => {
+        if (!active || paused) return;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const type: "heart" | "coin" =
+            Math.random() < POWERUP_HEART_CHANCE ? "heart" : "coin";
+          powerUps = [...powerUps, createPowerUp(canvas.width, type)];
+        }
+        schedulePowerUpSpawn();
+      }, interval);
+    }
+
+    // --- End game helpers ---
+    function triggerGameOver() {
+      active = false;
+      getAudioEngine().stopBackgroundMusic();
+      getAudioEngine().playGameOverSound();
+      finalScoreRef.current = score;
+      finalLevelRef.current = level;
+      setSessionStats({
+        dodged: statsDodged,
+        hits: statsHits,
+        powerUps: statsPowerUps,
       });
+      setShowGameOver(true);
+    }
 
-      poseRef.current = pose;
+    function triggerLegend() {
+      active = false;
+      getAudioEngine().stopBackgroundMusic();
+      getAudioEngine().playLevelUpSound();
+      finalScoreRef.current = score;
+      finalLevelRef.current = level;
+      setShowLegend(true);
+    }
 
-      // Try camera via getUserMedia
-      try {
-        if (window.Camera) {
-          const mpCamera = new window.Camera(videoRef.current, {
-            onFrame: async () => {
-              if (
-                poseRef.current &&
-                videoRef.current &&
-                gameActiveRef.current
-              ) {
-                await poseRef.current.send({ image: videoRef.current });
-              }
-            },
-            width: 640,
-            height: 480,
-          });
-          await mpCamera.start();
-          cameraRef.current = mpCamera;
-        } else {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: "user",
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-            },
-          });
-          streamRef.current = stream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            await videoRef.current.play();
+    function triggerLevelUp(newLevel: number, newScore: number) {
+      active = false;
+      meteors = [];
+      powerUps = [];
+      getAudioEngine().playLevelUpSound();
+      finalScoreRef.current = newScore;
+      finalLevelRef.current = newLevel;
+      setLevelUpData({ level: newLevel, score: newScore });
+      setShowLevelUp(true);
+    }
 
-            const processFrame = async () => {
-              if (!gameActiveRef.current) return;
-              if (
-                poseRef.current &&
-                videoRef.current &&
-                videoRef.current.readyState >= 2
-              ) {
-                await poseRef.current.send({ image: videoRef.current });
-              }
-              if (gameActiveRef.current) {
-                requestAnimationFrame(processFrame);
-              }
-            };
-            processFrame();
-          }
-        }
-      } catch (cameraErr) {
-        console.warn("Camera failed, enabling touch mode:", cameraErr);
-        touchModeRef.current = true;
-        setTouchMode(true);
+    // --- Game loop ---
+    function gameLoop() {
+      if (!active) return;
+
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) {
+        animFrame = requestAnimationFrame(gameLoop);
+        return;
       }
 
-      setMediaPipeReady(true);
-    } catch (err) {
-      console.error("MediaPipe init error:", err);
-      touchModeRef.current = true;
-      setTouchMode(true);
-      setMediaPipeReady(true); // continue without pose
-    }
-  }, []);
+      const center = touchModeRef.current
+        ? (touchBodyRef.current ?? {
+            x: canvas.width / 2,
+            y: canvas.height * 0.55,
+          })
+        : (bodyCenter ?? {
+            x: canvas.width / 2,
+            y: canvas.height * 0.55,
+          });
 
-  // ===================== SPAWN LOGIC =====================
-  const scheduleSpawn = useCallback(() => {
-    if (spawnTimerRef.current) {
-      clearTimeout(spawnTimerRef.current);
-    }
-    if (!gameActiveRef.current || isPausedRef.current) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const levelCfg = getLevelForScore(scoreRef.current);
-
-    spawnTimerRef.current = setTimeout(() => {
-      if (!gameActiveRef.current || isPausedRef.current) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      if (meteorsRef.current.length < levelCfg.maxMeteors) {
-        const newMeteor = createMeteor(
-          canvas.width,
-          levelCfg.speedMin,
-          levelCfg.speedMax,
-        );
-        meteorsRef.current = [...meteorsRef.current, newMeteor];
+      if (paused) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        animFrame = requestAnimationFrame(gameLoop);
+        return;
       }
-      scheduleSpawnRef.current();
-    }, levelCfg.spawnMs);
-  }, []);
 
-  // ===================== POWER-UP SPAWN =====================
-  const schedulePowerUpSpawn = useCallback(() => {
-    if (powerUpSpawnTimerRef.current) {
-      clearTimeout(powerUpSpawnTimerRef.current);
-    }
-    if (!gameActiveRef.current || isPausedRef.current) return;
+      // Update meteors
+      const nextMeteors: Meteor[] = [];
+      let scoreGained = 0;
+      let hitOccurred = false;
 
-    const interval = getPowerUpSpawnInterval(levelRef.current);
+      for (const meteor of meteors) {
+        const updated = updateMeteor(meteor);
 
-    powerUpSpawnTimerRef.current = setTimeout(() => {
-      if (!gameActiveRef.current || isPausedRef.current) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const type: "heart" | "coin" =
-        Math.random() < POWERUP_HEART_CHANCE ? "heart" : "coin";
-      const newPowerUp = createPowerUp(canvas.width, type);
-      powerUpsRef.current = [...powerUpsRef.current, newPowerUp];
-
-      schedulePowerUpSpawnRef.current();
-    }, interval);
-  }, []);
-
-  // ===================== GAME LOOP =====================
-  // Stable ref-wrapped versions to avoid stale closures in setTimeout callbacks
-  const scheduleSpawnRef = useRef<() => void>(() => {});
-  const schedulePowerUpSpawnRef = useRef<() => void>(() => {});
-  const gameLoopRef = useRef<() => void>(() => {});
-
-  const gameLoop = useCallback(() => {
-    if (!gameActiveRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) {
-      animFrameRef.current = requestAnimationFrame(() => gameLoopRef.current());
-      return;
-    }
-
-    // In touch mode, use touch body position
-    const bodyCenter = touchModeRef.current
-      ? touchBodyRef.current
-      : bodyCenterRef.current;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (isPausedRef.current) {
-      // Draw pause overlay (semi-transparent, actual menu is in DOM)
-      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      animFrameRef.current = requestAnimationFrame(gameLoop);
-      return;
-    }
-
-    // --- Update meteors ---
-    const updatedMeteors: Meteor[] = [];
-    let scoreGained = 0;
-    let hitOccurred = false;
-
-    for (const meteor of meteorsRef.current) {
-      const updated = updateMeteor(meteor);
-
-      // Check if passed through (dodge)
-      if (isMeteorOffScreen(updated, canvas.height)) {
-        scoreGained += SCORE_PER_METEOR;
-        statsMeteorsDodgedRef.current += 1;
-
-        // Dodge sound at lower frequency
-        if (Math.random() < 0.4) {
-          getAudioEngine().playDodgeSound();
+        if (isMeteorOffScreen(updated, canvas.height)) {
+          scoreGained += SCORE_PER_METEOR;
+          statsDodged += 1;
+          if (Math.random() < 0.4) getAudioEngine().playDodgeSound();
+          addScorePopup(
+            updated.x,
+            canvas.height - 40,
+            SCORE_PER_METEOR,
+            "score",
+          );
+          continue;
         }
 
-        // Score popup at bottom of screen
-        addScorePopup(updated.x, canvas.height - 40, SCORE_PER_METEOR, "score");
-        continue; // remove meteor
-      }
-
-      // Collision check
-      if (bodyCenter && !isInvincibleRef.current) {
-        if (checkCollision(updated, bodyCenter)) {
+        if (!isInvincible && checkCollision(updated, center)) {
           hitOccurred = true;
-          continue; // remove meteor that hit
+          continue;
         }
+
+        nextMeteors.push(updated);
       }
+      meteors = nextMeteors;
 
-      updatedMeteors.push(updated);
-    }
+      // Update power-ups
+      const nextPowerUps: PowerUp[] = [];
+      for (const pu of powerUps) {
+        const updated = updatePowerUp(pu);
+        if (isPowerUpOffScreen(updated, canvas.height)) continue;
 
-    meteorsRef.current = updatedMeteors;
-
-    // --- Update power-ups ---
-    const updatedPowerUps: PowerUp[] = [];
-    for (const pu of powerUpsRef.current) {
-      const updated = updatePowerUp(pu);
-
-      // Off screen -- just remove
-      if (isPowerUpOffScreen(updated, canvas.height)) {
-        continue;
-      }
-
-      // Player collision -- pick up
-      if (bodyCenter && checkPowerUpCollision(updated, bodyCenter)) {
-        statsPowerUpsRef.current += 1;
-        if (updated.type === "heart") {
-          const newLives = Math.min(livesRef.current + 1, MAX_LIVES);
-          livesRef.current = newLives;
-          setLives(newLives);
-          addScorePopup(updated.x, updated.y, 1, "heart");
-        } else {
-          const bonus = POWERUP_BONUS_SCORE;
-          scoreGained += bonus;
-          addScorePopup(updated.x, updated.y, bonus, "coin");
+        if (checkPowerUpCollision(updated, center)) {
+          statsPowerUps += 1;
+          if (updated.type === "heart") {
+            lives = Math.min(lives + 1, MAX_LIVES);
+            setSessionStats((s) => ({ ...s })); // trigger re-eval via state
+            addScorePopup(updated.x, updated.y, 1, "heart");
+          } else {
+            scoreGained += POWERUP_BONUS_SCORE;
+            addScorePopup(updated.x, updated.y, POWERUP_BONUS_SCORE, "coin");
+          }
+          getAudioEngine().playPickupSound(updated.type);
+          continue;
         }
-        getAudioEngine().playPickupSound(updated.type);
-        continue; // remove collected power-up
+
+        nextPowerUps.push(updated);
       }
+      powerUps = nextPowerUps;
 
-      updatedPowerUps.push(updated);
-    }
-    powerUpsRef.current = updatedPowerUps;
+      // Apply score gain
+      if (scoreGained > 0) {
+        score += scoreGained;
+        finalScoreRef.current = score;
+        // Sync HUD
+        const newLevelCfg = getLevelForScore(score);
+        if (newLevelCfg.level > level) {
+          level = newLevelCfg.level;
+          finalLevelRef.current = level;
 
-    // Handle score gain
-    if (scoreGained > 0) {
-      const newScore = scoreRef.current + scoreGained;
-      scoreRef.current = newScore;
-      setScore(newScore);
-
-      // Check level up
-      const newLevel = getLevelForScore(newScore);
-      if (newLevel.level > levelRef.current) {
-        levelRef.current = newLevel.level;
-        setCurrentLevel(newLevel.level);
-
-        // Trigger level up screen
-        gameActiveRef.current = false;
-        meteorsRef.current = [];
-
-        // Bölüm 50 tamamlandı -- Efsane ekranı
-        if (newLevel.level >= LEVELS.length) {
-          getAudioEngine().stopBackgroundMusic();
-          getAudioEngine().playLevelUpSound();
-          setShowLegend(true);
+          if (newLevelCfg.level >= LEVELS.length) {
+            triggerLegend();
+            return;
+          }
+          triggerLevelUp(newLevelCfg.level, score);
           return;
         }
-
-        setLevelUpData({ level: newLevel.level, score: newScore });
-        setShowLevelUp(true);
-        getAudioEngine().playLevelUpSound();
-        return;
       }
-    }
 
-    // Handle hit
-    if (hitOccurred && !isInvincibleRef.current) {
-      statsHitsRef.current += 1;
-      const newLives = livesRef.current - 1;
-      livesRef.current = newLives;
-      setLives(newLives);
+      // Apply hit
+      if (hitOccurred && !isInvincible) {
+        statsHits += 1;
+        lives -= 1;
+        isInvincible = true;
+        isHit = true;
+        getAudioEngine().playHitSound();
 
-      // Invincibility
-      isInvincibleRef.current = true;
-      isHitRef.current = true;
-      getAudioEngine().playHitSound();
+        if (hitTimer) clearTimeout(hitTimer);
+        hitTimer = setTimeout(() => {
+          isHit = false;
+        }, 300);
 
-      if (hitTimerRef.current) clearTimeout(hitTimerRef.current);
-      hitTimerRef.current = setTimeout(() => {
-        isHitRef.current = false;
-      }, 300);
+        if (invincibleTimer) clearTimeout(invincibleTimer);
+        invincibleTimer = setTimeout(() => {
+          isInvincible = false;
+          isHit = false;
+        }, INVINCIBILITY_DURATION);
 
-      if (invincibleTimerRef.current) clearTimeout(invincibleTimerRef.current);
-      invincibleTimerRef.current = setTimeout(() => {
-        isInvincibleRef.current = false;
-        isHitRef.current = false;
-      }, INVINCIBILITY_DURATION);
-
-      if (newLives <= 0) {
-        // Game over
-        gameActiveRef.current = false;
-        getAudioEngine().stopBackgroundMusic();
-        getAudioEngine().playGameOverSound();
-        setSessionStats({
-          dodged: statsMeteorsDodgedRef.current,
-          hits: statsHitsRef.current,
-          powerUps: statsPowerUpsRef.current,
-        });
-        setShowGameOver(true);
-        return;
-      }
-    }
-
-    // --- Render ---
-    // Draw meteors
-    for (const meteor of meteorsRef.current) {
-      drawMeteor(ctx, meteor);
-    }
-
-    // Draw power-ups
-    for (const pu of powerUpsRef.current) {
-      drawPowerUp(ctx, pu);
-    }
-
-    // Draw player badge
-    if (bodyCenter) {
-      drawPlayerBadge(
-        ctx,
-        bodyCenter,
-        playerName,
-        isHitRef.current,
-        isInvincibleRef.current,
-      );
-    }
-
-    // Draw HUD
-    drawHUD(
-      ctx,
-      livesRef.current,
-      scoreRef.current,
-      levelRef.current,
-      canvas.width,
-      t("hud.score", langRef.current),
-      t("hud.level", langRef.current),
-      themeRef.current.primaryColor,
-      themeRef.current.secondaryColor,
-    );
-
-    animFrameRef.current = requestAnimationFrame(() => gameLoopRef.current());
-  }, [playerName, addScorePopup]);
-
-  // ===================== RESIZE HANDLER =====================
-  const handleResize = useCallback(() => {
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas) return;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    if (video) {
-      video.style.width = "100%";
-      video.style.height = "100%";
-    }
-    // Initialize touch position to center
-    if (!touchBodyRef.current) {
-      touchBodyRef.current = {
-        x: window.innerWidth / 2,
-        y: window.innerHeight * 0.5,
-      };
-    }
-    // Set a default body center so badge is visible before MediaPipe detects pose
-    if (!bodyCenterRef.current) {
-      bodyCenterRef.current = {
-        x: window.innerWidth / 2,
-        y: window.innerHeight * 0.55,
-      };
-    }
-  }, []);
-
-  // Keep refs updated to latest function versions (fixes stale closure issue)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional ref sync
-  useEffect(() => {
-    gameLoopRef.current = gameLoop;
-    scheduleSpawnRef.current = scheduleSpawn;
-    schedulePowerUpSpawnRef.current = schedulePowerUpSpawn;
-  });
-
-  // ===================== COUNTDOWN LOGIC =====================
-  const startCountdownAndGame = useCallback(() => {
-    setCountdown(3);
-
-    // Clear any existing countdown timers
-    for (const t of countdownTimersRef.current) clearTimeout(t);
-    countdownTimersRef.current = [];
-
-    const steps: { value: CountdownValue; delay: number }[] = [
-      { value: 3, delay: 0 },
-      { value: 2, delay: 1000 },
-      { value: 1, delay: 2000 },
-      { value: "go", delay: 3000 },
-      { value: null, delay: 3700 },
-    ];
-
-    for (const step of steps) {
-      const tid = setTimeout(() => {
-        if (!gameActiveRef.current) return;
-        setCountdown(step.value);
-        if (step.value === null) {
-          getAudioEngine().startBackgroundMusic();
-          gameLoopRef.current();
-          scheduleSpawnRef.current();
-          schedulePowerUpSpawnRef.current();
+        if (lives <= 0) {
+          triggerGameOver();
+          return;
         }
-      }, step.delay);
-      countdownTimersRef.current.push(tid);
-    }
-  }, []);
-
-  // ===================== MOUNT / CLEANUP =====================
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
-  useEffect(() => {
-    gameActiveRef.current = true;
-    isPausedRef.current = false;
-    scoreRef.current = initialScore;
-    livesRef.current = initialLives;
-    levelRef.current = initialLevel;
-    meteorsRef.current = [];
-    powerUpsRef.current = [];
-
-    // Set canvas size
-    handleResize();
-    window.addEventListener("resize", handleResize);
-
-    // Init MediaPipe then start countdown
-    initMediaPipe().then(() => {
-      if (gameActiveRef.current) {
-        startCountdownAndGame();
       }
+
+      // Render
+      for (const m of meteors) drawMeteor(ctx, m);
+      for (const pu of powerUps) drawPowerUp(ctx, pu);
+
+      drawPlayerBadge(ctx, center, playerNameRef.current, isHit, isInvincible);
+      drawHUD(
+        ctx,
+        lives,
+        score,
+        level,
+        canvas.width,
+        t("hud.score", langRef.current),
+        t("hud.level", langRef.current),
+        themeRef.current.primaryColor,
+        themeRef.current.secondaryColor,
+      );
+
+      animFrame = requestAnimationFrame(gameLoop);
+    }
+
+    // --- Countdown then start ---
+    function startCountdown() {
+      setCountdown(3);
+      const steps: { value: CountdownValue; delay: number }[] = [
+        { value: 3, delay: 0 },
+        { value: 2, delay: 1000 },
+        { value: 1, delay: 2000 },
+        { value: "go", delay: 3000 },
+        { value: null, delay: 3700 },
+      ];
+      for (const step of steps) {
+        const tid = setTimeout(() => {
+          if (!active) return;
+          setCountdown(step.value);
+          if (step.value === null) {
+            getAudioEngine().startBackgroundMusic();
+            gameLoop();
+            scheduleSpawn();
+            schedulePowerUpSpawn();
+          }
+        }, step.delay);
+        countdownTimers.push(tid);
+      }
+    }
+
+    // --- MediaPipe init ---
+    async function initMediaPipe() {
+      if (!videoRef.current) return;
+
+      let attempts = 0;
+      while (!window.Pose && attempts < 30) {
+        await new Promise((r) => setTimeout(r, 200));
+        attempts++;
+      }
+
+      if (!active) return; // unmounted during wait
+
+      if (!window.Pose) {
+        touchModeRef.current = true;
+        setTouchMode(true);
+        setMediaPipeReady(true);
+        return;
+      }
+
+      try {
+        const pose = new window.Pose({
+          locateFile: (file: string) =>
+            `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+        });
+
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+
+        pose.onResults((results: PoseResults) => {
+          if (!results.poseLandmarks || !canvasRef.current) return;
+          const canvas = canvasRef.current;
+          const lm = results.poseLandmarks;
+          const ls = lm[11];
+          const rs = lm[12];
+          const lh = lm[23];
+          const rh = lm[24];
+          if (!ls || !rs || !lh || !rh) return;
+
+          const shoulderMidX = (1 - (ls.x + rs.x) / 2) * canvas.width;
+          const shoulderMidY = ((ls.y + rs.y) / 2) * canvas.height;
+          const hipMidX = (1 - (lh.x + rh.x) / 2) * canvas.width;
+          const hipMidY = ((lh.y + rh.y) / 2) * canvas.height;
+
+          const rawX = shoulderMidX * 0.7 + hipMidX * 0.3;
+          const rawY = shoulderMidY * 0.7 + hipMidY * 0.3;
+
+          if (!smoothedBody) {
+            smoothedBody = { x: rawX, y: rawY };
+          } else {
+            smoothedBody = {
+              x:
+                SMOOTHING_ALPHA * rawX + (1 - SMOOTHING_ALPHA) * smoothedBody.x,
+              y:
+                SMOOTHING_ALPHA * rawY + (1 - SMOOTHING_ALPHA) * smoothedBody.y,
+            };
+          }
+          bodyCenter = smoothedBody;
+        });
+
+        poseHandle = pose;
+
+        try {
+          if (window.Camera) {
+            const mpCamera = new window.Camera(videoRef.current, {
+              onFrame: async () => {
+                if (poseHandle && videoRef.current && active) {
+                  await poseHandle.send({ image: videoRef.current });
+                }
+              },
+              width: 640,
+              height: 480,
+            });
+            await mpCamera.start();
+            if (!active) {
+              mpCamera.stop();
+              return;
+            }
+            cameraHandle = mpCamera;
+          } else {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: "user",
+                width: { ideal: 640 },
+                height: { ideal: 480 },
+              },
+            });
+            if (!active) {
+              for (const t of stream.getTracks()) t.stop();
+              return;
+            }
+            streamHandle = stream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
+              await videoRef.current.play();
+
+              const processFrame = async () => {
+                if (!active) return;
+                if (
+                  poseHandle &&
+                  videoRef.current &&
+                  videoRef.current.readyState >= 2
+                ) {
+                  await poseHandle.send({ image: videoRef.current });
+                }
+                if (active) requestAnimationFrame(processFrame);
+              };
+              processFrame();
+            }
+          }
+        } catch {
+          touchModeRef.current = true;
+          setTouchMode(true);
+        }
+
+        if (active) setMediaPipeReady(true);
+      } catch {
+        touchModeRef.current = true;
+        setTouchMode(true);
+        if (active) setMediaPipeReady(true);
+      }
+    }
+
+    // --- Boot sequence ---
+    initMediaPipe().then(() => {
+      if (active) startCountdown();
     });
 
-    return () => {
-      gameActiveRef.current = false;
-      window.removeEventListener("resize", handleResize);
-
-      // Clear all countdown timers so music never starts after unmount
-      for (const t of countdownTimersRef.current) clearTimeout(t);
-      countdownTimersRef.current = [];
-
-      if (animFrameRef.current !== null) {
-        cancelAnimationFrame(animFrameRef.current);
-        animFrameRef.current = null;
-      }
-      if (spawnTimerRef.current) {
-        clearTimeout(spawnTimerRef.current);
-        spawnTimerRef.current = null;
-      }
-      if (powerUpSpawnTimerRef.current) {
-        clearTimeout(powerUpSpawnTimerRef.current);
-        powerUpSpawnTimerRef.current = null;
-      }
-      if (invincibleTimerRef.current) {
-        clearTimeout(invincibleTimerRef.current);
-      }
-      if (hitTimerRef.current) {
-        clearTimeout(hitTimerRef.current);
-      }
-
-      // Stop camera
-      if (cameraRef.current) {
-        cameraRef.current.stop();
-        cameraRef.current = null;
-      }
-
-      // Stop stream tracks
-      if (streamRef.current) {
-        for (const track of streamRef.current.getTracks()) {
-          track.stop();
+    // ---- Expose resume/pause so event handlers can call them ----
+    // We expose them via refs so the JSX event handlers below can use them.
+    pauseResumeRef.current = {
+      pause: () => {
+        if (!paused) {
+          paused = true;
+          isPausedRef.current = true;
+          setIsPaused(true);
+          setShowPauseMenu(true);
+          getAudioEngine().stopBackgroundMusic();
+          if (spawnTimer) clearTimeout(spawnTimer);
+          if (powerUpTimer) clearTimeout(powerUpTimer);
         }
-        streamRef.current = null;
-      }
+      },
+      resume: () => {
+        if (paused) {
+          paused = false;
+          isPausedRef.current = false;
+          setIsPaused(false);
+          setShowPauseMenu(false);
+          getAudioEngine().startBackgroundMusic();
+          scheduleSpawn();
+          schedulePowerUpSpawn();
+        }
+      },
+      continueAfterLevel: () => {
+        // Called from LevelUpScreen continue button
+        active = true;
+        paused = false;
+        isPausedRef.current = false;
+        meteors = [];
+        powerUps = [];
+        lives = MAX_LIVES;
+        score = finalScoreRef.current;
+        level = finalLevelRef.current;
+        setShowLevelUp(false);
+        startCountdown();
+      },
+    };
 
-      // Close pose
-      if (poseRef.current) {
-        poseRef.current.close().catch(() => {});
-        poseRef.current = null;
+    // --- Cleanup ---
+    return () => {
+      active = false;
+
+      for (const tid of countdownTimers) clearTimeout(tid);
+      if (animFrame !== null) cancelAnimationFrame(animFrame);
+      if (spawnTimer) clearTimeout(spawnTimer);
+      if (powerUpTimer) clearTimeout(powerUpTimer);
+      if (invincibleTimer) clearTimeout(invincibleTimer);
+      if (hitTimer) clearTimeout(hitTimer);
+
+      window.removeEventListener("resize", resizeCanvas);
+
+      if (cameraHandle) {
+        cameraHandle.stop();
+        cameraHandle = null;
+      }
+      if (streamHandle) {
+        for (const track of streamHandle.getTracks()) track.stop();
+        streamHandle = null;
+      }
+      if (poseHandle) {
+        poseHandle.close().catch(() => {});
+        poseHandle = null;
       }
 
       getAudioEngine().stopBackgroundMusic();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // single mount, intentionally empty deps
+
+  // Ref to bridge JSX event handlers -> engine functions defined inside effect
+  const pauseResumeRef = useRef<{
+    pause: () => void;
+    resume: () => void;
+    continueAfterLevel: () => void;
+  }>({
+    pause: () => {},
+    resume: () => {},
+    continueAfterLevel: () => {},
+  });
 
   // ===================== TOUCH / MOUSE MOVE =====================
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -692,36 +655,23 @@ export function GameScreen({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    touchBodyRef.current = { x, y };
-    bodyCenterRef.current = { x, y };
+    touchBodyRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
   }
 
   // ===================== PAUSE TOGGLE =====================
   function togglePause() {
-    const newPaused = !isPausedRef.current;
-    isPausedRef.current = newPaused;
-    setIsPaused(newPaused);
-    setShowPauseMenu(newPaused);
-
-    if (newPaused) {
-      getAudioEngine().stopBackgroundMusic();
-      if (spawnTimerRef.current) {
-        clearTimeout(spawnTimerRef.current);
-      }
-      if (powerUpSpawnTimerRef.current) {
-        clearTimeout(powerUpSpawnTimerRef.current);
-      }
+    if (isPausedRef.current) {
+      pauseResumeRef.current.resume();
     } else {
-      getAudioEngine().startBackgroundMusic();
-      scheduleSpawnRef.current();
-      schedulePowerUpSpawnRef.current();
+      pauseResumeRef.current.pause();
     }
   }
 
   function handleResume() {
-    togglePause();
+    pauseResumeRef.current.resume();
   }
 
   function handleToggleMute() {
@@ -743,33 +693,19 @@ export function GameScreen({
   }
 
   function handleMainMenu() {
-    gameActiveRef.current = false;
     getAudioEngine().stopBackgroundMusic();
-    onGameOver(scoreRef.current, levelRef.current);
+    onGameOver(finalScoreRef.current, finalLevelRef.current);
   }
 
-  // ===================== LEVEL UP CONTINUE =====================
   function handleLevelUpContinue() {
-    setShowLevelUp(false);
-    gameActiveRef.current = true;
-    meteorsRef.current = [];
-    powerUpsRef.current = [];
-
-    // Reset lives to full on each new level
-    livesRef.current = MAX_LIVES;
-    setLives(MAX_LIVES);
-
-    // Countdown before resuming -- use startCountdownAndGame to ensure timers are tracked
-    startCountdownAndGame();
+    pauseResumeRef.current.continueAfterLevel();
   }
 
-  // ===================== GAME OVER =====================
   function handleGameOver() {
     getAudioEngine().stopBackgroundMusic();
-    onGameOver(scoreRef.current, levelRef.current);
+    onGameOver(finalScoreRef.current, finalLevelRef.current);
   }
 
-  // Countdown display text
   function getCountdownText(): string {
     if (countdown === null) return "";
     if (countdown === "go") return t("game.countdown.go", lang);
@@ -782,7 +718,7 @@ export function GameScreen({
       onPointerMove={handlePointerMove}
       style={{ cursor: touchMode ? "none" : undefined }}
     >
-      {/* Camera video (mirrored) - hidden in touch mode */}
+      {/* Camera video (mirrored) */}
       <video
         ref={videoRef}
         className="game-video"
@@ -807,7 +743,7 @@ export function GameScreen({
         className="game-canvas"
       />
 
-      {/* Touch mode cursor indicator */}
+      {/* Touch mode indicator */}
       {touchMode && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
           <div
@@ -824,7 +760,7 @@ export function GameScreen({
         </div>
       )}
 
-      {/* Score popups (DOM layer) */}
+      {/* Score popups */}
       {scorePopups.map((popup) => (
         <div
           key={popup.id}
@@ -856,7 +792,7 @@ export function GameScreen({
         </div>
       ))}
 
-      {/* MediaPipe loading indicator */}
+      {/* MediaPipe loading */}
       {!mediaPipeReady && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40">
           <div
@@ -903,7 +839,7 @@ export function GameScreen({
         )}
       </AnimatePresence>
 
-      {/* Language selector + Pause button (top right) */}
+      {/* Language + Pause (top right) */}
       <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
         <LanguageSelector />
         <button
@@ -951,7 +887,7 @@ export function GameScreen({
         </button>
       </div>
 
-      {/* Pause Menu Overlay */}
+      {/* Pause Menu */}
       <AnimatePresence>
         {showPauseMenu && (
           <motion.div
@@ -980,7 +916,6 @@ export function GameScreen({
                 boxShadow: theme.glow ?? `0 0 40px ${theme.primaryColor}30`,
               }}
             >
-              {/* Title */}
               <h2
                 className="text-2xl font-black tracking-widest mb-6"
                 style={{
@@ -992,9 +927,7 @@ export function GameScreen({
                 {t("game.pause.title", lang)}
               </h2>
 
-              {/* Buttons */}
               <div className="flex flex-col gap-3">
-                {/* Resume */}
                 <button
                   type="button"
                   data-ocid="pause.resume_button"
@@ -1013,7 +946,6 @@ export function GameScreen({
                   ▶ {t("game.pause.resume", lang)}
                 </button>
 
-                {/* Sound toggle + volume slider */}
                 <div
                   className="rounded-xl px-3 py-2"
                   style={{
@@ -1073,7 +1005,6 @@ export function GameScreen({
                   />
                 </div>
 
-                {/* Main menu */}
                 <button
                   type="button"
                   data-ocid="pause.mainmenu_button"
@@ -1094,7 +1025,7 @@ export function GameScreen({
         )}
       </AnimatePresence>
 
-      {/* Level Up Screen overlay */}
+      {/* Level Up Screen */}
       <AnimatePresence>
         {showLevelUp && (
           <LevelUpScreen
@@ -1105,12 +1036,12 @@ export function GameScreen({
         )}
       </AnimatePresence>
 
-      {/* Game Over Screen overlay */}
+      {/* Game Over Screen */}
       <AnimatePresence>
         {showGameOver && (
           <GameOverScreen
-            score={scoreRef.current}
-            level={levelRef.current}
+            score={finalScoreRef.current}
+            level={finalLevelRef.current}
             playerName={playerName}
             onRestart={handleGameOver}
             meteorsDodged={sessionStats.dodged}
@@ -1120,11 +1051,11 @@ export function GameScreen({
         )}
       </AnimatePresence>
 
-      {/* Legend Screen (bölüm 50 tamamlama) */}
+      {/* Legend Screen */}
       <AnimatePresence>
         {showLegend && (
           <LegendScreen
-            score={scoreRef.current}
+            score={finalScoreRef.current}
             playerName={playerName}
             onRestart={handleGameOver}
           />
