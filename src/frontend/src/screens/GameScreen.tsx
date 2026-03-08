@@ -313,7 +313,7 @@ export function GameScreen({
         );
         meteorsRef.current = [...meteorsRef.current, newMeteor];
       }
-      scheduleSpawn();
+      scheduleSpawnRef.current();
     }, levelCfg.spawnMs);
   }, []);
 
@@ -336,18 +336,23 @@ export function GameScreen({
       const newPowerUp = createPowerUp(canvas.width, type);
       powerUpsRef.current = [...powerUpsRef.current, newPowerUp];
 
-      schedulePowerUpSpawn();
+      schedulePowerUpSpawnRef.current();
     }, interval);
   }, []);
 
   // ===================== GAME LOOP =====================
+  // Stable ref-wrapped versions to avoid stale closures in setTimeout callbacks
+  const scheduleSpawnRef = useRef<() => void>(() => {});
+  const schedulePowerUpSpawnRef = useRef<() => void>(() => {});
+  const gameLoopRef = useRef<() => void>(() => {});
+
   const gameLoop = useCallback(() => {
     if (!gameActiveRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) {
-      animFrameRef.current = requestAnimationFrame(gameLoop);
+      animFrameRef.current = requestAnimationFrame(() => gameLoopRef.current());
       return;
     }
 
@@ -538,7 +543,7 @@ export function GameScreen({
       themeRef.current.secondaryColor,
     );
 
-    animFrameRef.current = requestAnimationFrame(gameLoop);
+    animFrameRef.current = requestAnimationFrame(() => gameLoopRef.current());
   }, [playerName, addScorePopup]);
 
   // ===================== RESIZE HANDLER =====================
@@ -552,14 +557,29 @@ export function GameScreen({
       video.style.width = "100%";
       video.style.height = "100%";
     }
-    // Initialize touch position to center if in touch mode
-    if (touchModeRef.current && !touchBodyRef.current) {
+    // Initialize touch position to center
+    if (!touchBodyRef.current) {
       touchBodyRef.current = {
         x: window.innerWidth / 2,
         y: window.innerHeight * 0.5,
       };
     }
+    // Set a default body center so badge is visible before MediaPipe detects pose
+    if (!bodyCenterRef.current) {
+      bodyCenterRef.current = {
+        x: window.innerWidth / 2,
+        y: window.innerHeight * 0.55,
+      };
+    }
   }, []);
+
+  // Keep refs updated to latest function versions (fixes stale closure issue)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional ref sync
+  useEffect(() => {
+    gameLoopRef.current = gameLoop;
+    scheduleSpawnRef.current = scheduleSpawn;
+    schedulePowerUpSpawnRef.current = schedulePowerUpSpawn;
+  });
 
   // ===================== COUNTDOWN LOGIC =====================
   const startCountdownAndGame = useCallback(() => {
@@ -578,13 +598,13 @@ export function GameScreen({
         setCountdown(step.value);
         if (step.value === null && gameActiveRef.current) {
           getAudioEngine().startBackgroundMusic();
-          gameLoop();
-          scheduleSpawn();
-          schedulePowerUpSpawn();
+          gameLoopRef.current();
+          scheduleSpawnRef.current();
+          schedulePowerUpSpawnRef.current();
         }
       }, step.delay);
     }
-  }, [gameLoop, scheduleSpawn, schedulePowerUpSpawn]);
+  }, []);
 
   // ===================== MOUNT / CLEANUP =====================
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
@@ -684,8 +704,8 @@ export function GameScreen({
       }
     } else {
       getAudioEngine().startBackgroundMusic();
-      scheduleSpawn();
-      schedulePowerUpSpawn();
+      scheduleSpawnRef.current();
+      schedulePowerUpSpawnRef.current();
     }
   }
 
@@ -746,9 +766,9 @@ export function GameScreen({
             cancelAnimationFrame(animFrameRef.current);
           }
           getAudioEngine().startBackgroundMusic();
-          gameLoop();
-          scheduleSpawn();
-          schedulePowerUpSpawn();
+          gameLoopRef.current();
+          scheduleSpawnRef.current();
+          schedulePowerUpSpawnRef.current();
         }
       }, step.delay);
     }
