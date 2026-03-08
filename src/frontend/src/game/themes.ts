@@ -12,6 +12,9 @@ export interface ThemeConfig {
   cardBg?: string;
   glow?: string;
   btnBg?: string;
+  // Canvas-safe hex equivalents (Canvas API doesn't support oklch)
+  canvasPrimary: string;
+  canvasSecondary: string;
 }
 
 export const THEMES: ThemeConfig[] = [
@@ -30,6 +33,8 @@ export const THEMES: ThemeConfig[] = [
     glow: "0 0 30px oklch(0.78 0.22 195 / 0.6), 0 0 60px oklch(0.78 0.22 195 / 0.3)",
     btnBg:
       "linear-gradient(135deg, oklch(0.60 0.22 195), oklch(0.50 0.20 220))",
+    canvasPrimary: "#00d4b8",
+    canvasSecondary: "#f5c842",
   },
   {
     id: "neon",
@@ -46,6 +51,8 @@ export const THEMES: ThemeConfig[] = [
     glow: "0 0 30px oklch(0.78 0.30 220 / 0.6), 0 0 60px oklch(0.75 0.34 330 / 0.4)",
     btnBg:
       "linear-gradient(135deg, oklch(0.58 0.30 220), oklch(0.50 0.32 330))",
+    canvasPrimary: "#00aaff",
+    canvasSecondary: "#ff44cc",
   },
   {
     id: "volcanic",
@@ -61,6 +68,8 @@ export const THEMES: ThemeConfig[] = [
       "linear-gradient(135deg, oklch(0.16 0.08 25 / 0.92), oklch(0.12 0.06 20 / 0.95))",
     glow: "0 0 30px oklch(0.75 0.28 40 / 0.6), 0 0 60px oklch(0.68 0.30 20 / 0.4)",
     btnBg: "linear-gradient(135deg, oklch(0.60 0.30 35), oklch(0.48 0.26 20))",
+    canvasPrimary: "#ff6622",
+    canvasSecondary: "#ffaa00",
   },
   {
     id: "ice",
@@ -77,6 +86,8 @@ export const THEMES: ThemeConfig[] = [
     glow: "0 0 30px oklch(0.85 0.20 210 / 0.6), 0 0 60px oklch(0.70 0.25 240 / 0.4)",
     btnBg:
       "linear-gradient(135deg, oklch(0.60 0.24 210), oklch(0.50 0.22 240))",
+    canvasPrimary: "#66ccee",
+    canvasSecondary: "#aaddff",
   },
   {
     id: "gold",
@@ -92,6 +103,8 @@ export const THEMES: ThemeConfig[] = [
       "linear-gradient(135deg, oklch(0.18 0.08 65 / 0.92), oklch(0.14 0.06 60 / 0.95))",
     glow: "0 0 30px oklch(0.85 0.22 80 / 0.7), 0 0 60px oklch(0.65 0.20 50 / 0.4)",
     btnBg: "linear-gradient(135deg, oklch(0.65 0.24 80), oklch(0.52 0.20 60))",
+    canvasPrimary: "#ffcc00",
+    canvasSecondary: "#ffe066",
   },
 ];
 

@@ -1,6 +1,24 @@
 import { METEOR_COLOR_SETS, PLAYER_HITBOX_RADIUS } from "./constants";
 import type { Meteor, PowerUp } from "./types";
 
+/**
+ * Returns a hex color string with the given 0-255 alpha appended as two hex digits.
+ * Falls back to rgba() if the input is not a 6-char hex color, so Canvas never
+ * receives an invalid value like "oklch(...)44".
+ */
+function hexWithAlpha(color: string, alpha: number): string {
+  const hex = color.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+    const a = Math.round(Math.max(0, Math.min(255, alpha)))
+      .toString(16)
+      .padStart(2, "0");
+    return `${hex}${a}`;
+  }
+  // Fallback: convert to rgba using a temporary canvas (avoid oklch crash)
+  const a01 = alpha / 255;
+  return `rgba(128,128,128,${a01.toFixed(2)})`;
+}
+
 let meteorIdCounter = 0;
 
 /**
@@ -554,8 +572,8 @@ export function drawHUD(
   // Border bottom with theme primary color
   const hudGrad = ctx.createLinearGradient(0, 68, canvasWidth, 68);
   hudGrad.addColorStop(0, "transparent");
-  hudGrad.addColorStop(0.3, `${primaryColor}44`);
-  hudGrad.addColorStop(0.7, `${primaryColor}44`);
+  hudGrad.addColorStop(0.3, hexWithAlpha(primaryColor, 0x44));
+  hudGrad.addColorStop(0.7, hexWithAlpha(primaryColor, 0x44));
   hudGrad.addColorStop(1, "transparent");
   ctx.fillStyle = hudGrad;
   ctx.fillRect(0, 68, canvasWidth, 2);
@@ -580,7 +598,7 @@ export function drawHUD(
   // Score (center)
   ctx.textAlign = "center";
   ctx.font = 'bold 14px "Orbitron", "Sora", monospace';
-  ctx.fillStyle = `${primaryColor}99`;
+  ctx.fillStyle = hexWithAlpha(primaryColor, 0x99);
   ctx.fillText(scoreLabel, canvasWidth / 2, 18);
   ctx.font = 'bold 26px "Orbitron", "Sora", monospace';
   ctx.fillStyle = primaryColor;
@@ -592,7 +610,7 @@ export function drawHUD(
   // Level (right side)
   ctx.textAlign = "right";
   ctx.font = 'bold 12px "Orbitron", "Sora", monospace';
-  ctx.fillStyle = `${secondaryColor}99`;
+  ctx.fillStyle = hexWithAlpha(secondaryColor, 0x99);
   ctx.fillText(levelLabel, canvasWidth - 16, 18);
   ctx.font = 'bold 28px "Orbitron", "Sora", monospace';
   ctx.fillStyle = secondaryColor;

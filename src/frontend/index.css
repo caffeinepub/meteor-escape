@@ -334,23 +334,7 @@
   filter: drop-shadow(0 0 2px #333);
 }
 
-/* Bricolage Grotesque - pre-installed variable font */
-@font-face {
-  font-family: 'Bricolage Grotesque';
-  src: url('/assets/fonts/BricolageGrotesque[opsz,wdth,wght].woff2') format('woff2');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* Sora - pre-installed font */
-@font-face {
-  font-family: 'Sora';
-  src: url('/assets/fonts/Sora[wght].woff2') format('woff2');
-  font-weight: 100 800;
-  font-style: normal;
-  font-display: swap;
-}
+/* Fonts loaded via Google Fonts CDN in index.html */
 
 /* =================== THEME TOKENS =================== */
 

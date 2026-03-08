@@ -350,6 +350,8 @@ export function GameScreen({
         if (newLevelCfg.level > level) {
           level = newLevelCfg.level;
           finalLevelRef.current = level;
+          // Smoothly transition music tier if level crossed a tier boundary
+          getAudioEngine().updateMusicForLevel(level);
 
           if (newLevelCfg.level >= LEVELS.length) {
             triggerLegend();
@@ -398,8 +400,8 @@ export function GameScreen({
         canvas.width,
         t("hud.score", langRef.current),
         t("hud.level", langRef.current),
-        themeRef.current.primaryColor,
-        themeRef.current.secondaryColor,
+        themeRef.current.canvasPrimary,
+        themeRef.current.canvasSecondary,
       );
 
       animFrame = requestAnimationFrame(gameLoop);
@@ -412,7 +414,7 @@ export function GameScreen({
       // Initialize spawn timestamps so first spawn is nearly immediate
       lastMeteorSpawnTime = 0;
       lastPowerUpSpawnTime = 0;
-      getAudioEngine().startBackgroundMusic();
+      getAudioEngine().startBackgroundMusic(level);
       // Start game loop -- timestamp param handled by rAF
       animFrame = requestAnimationFrame(gameLoop);
     }
@@ -456,7 +458,7 @@ export function GameScreen({
         isPausedRef.current = false;
         setIsPaused(false);
         setShowPauseMenu(false);
-        getAudioEngine().startBackgroundMusic();
+        getAudioEngine().startBackgroundMusic(level);
       }
     };
 

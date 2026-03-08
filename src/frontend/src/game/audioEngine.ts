@@ -1,24 +1,49 @@
 /**
  * AudioEngine - All sounds generated programmatically via Web Audio API
  * No audio files needed.
+ *
+ * Music is split into 4 dynamic tiers based on level:
+ *   Tier 1 (levels 1-10):  140 BPM - Intro / Calm  - bass + simple drum + lead melody
+ *   Tier 2 (levels 11-20): 148 BPM - Fast / Active  - + background synth pad
+ *   Tier 3 (levels 21-30): 154 BPM - Intense / Energetic - + arpeggio + complex drum
+ *   Tier 4 (levels 31-50): 160 BPM - Chaotic / Peak - full layer with sub-bass & effects
  */
 
 const MUTE_STORAGE_KEY = "meteorescape_muted";
 const VOLUME_STORAGE_KEY = "meteorescape_volume";
+
+function getMusicTier(level: number): 1 | 2 | 3 | 4 {
+  if (level <= 10) return 1;
+  if (level <= 20) return 2;
+  if (level <= 30) return 3;
+  return 4;
+}
+
+function getTierBPM(tier: 1 | 2 | 3 | 4): number {
+  switch (tier) {
+    case 1:
+      return 140;
+    case 2:
+      return 148;
+    case 3:
+      return 154;
+    case 4:
+      return 160;
+  }
+}
 
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private bgInterval: ReturnType<typeof setInterval> | null = null;
   private bgPlaying = false;
   private masterGain: GainNode | null = null;
+  private musicGain: GainNode | null = null;
   private _muted = false;
-  private _volume = 0.6; // 0.0 - 1.0
-  // Monotonically increasing session ID -- when stop is called, any in-flight
-  // async start with an older session ID will abort before playing anything.
+  private _volume = 0.6;
   private bgSession = 0;
+  private currentTier: 1 | 2 | 3 | 4 = 1;
 
   constructor() {
-    // Restore muted state and volume from localStorage
     try {
       this._muted = localStorage.getItem(MUTE_STORAGE_KEY) === "1";
       const storedVol = localStorage.getItem(VOLUME_STORAGE_KEY);
@@ -84,6 +109,9 @@ export class AudioEngine {
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = this._muted ? 0 : this._volume;
       this.masterGain.connect(this.ctx.destination);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 1;
+      this.musicGain.connect(this.masterGain);
     }
     if (this.ctx.state === "suspended") {
       await this.ctx.resume();
@@ -100,134 +128,311 @@ export class AudioEngine {
   }
 
   /**
-   * Background music: 140 BPM chiptune loop
-   * Square wave melody + triangle bass + kick + hi-hat
+   * Start or update background music for a given level.
+   * If the tier changes, the music restarts seamlessly.
    */
-  startBackgroundMusic(): void {
-    // If already playing, nothing to do
-    if (this.bgPlaying) return;
+  startBackgroundMusic(level = 1): void {
+    const newTier = getMusicTier(level);
 
+    // If already playing the same tier, nothing to do
+    if (this.bgPlaying && this.currentTier === newTier) return;
+
+    // If tier changed, stop old music and restart with new tier
+    if (this.bgPlaying && this.currentTier !== newTier) {
+      this._stopBgInternal();
+    }
+
+    this.currentTier = newTier;
     this.bgPlaying = true;
-    // Increment session so any previously queued stop-then-start can't race
     const session = ++this.bgSession;
 
-    const BPM = 140;
+    const BPM = getTierBPM(newTier);
     const BEAT_MS = (60 / BPM) * 1000;
 
-    // Pentatonic minor scale: D4=293.66, F4=349.23, G4=392, A4=440, C5=523.25
-    const notes = [293.66, 349.23, 392, 440, 392, 349.23, 293.66, 523.25];
+    // ─── Scale notes per tier ────────────────────────────────────────────────
+    // Tier 1: simple pentatonic minor (D4 scale) - calm, looping
+    // Tier 2: same base + higher octave alternation - more energy
+    // Tier 3: added chromatic passing tones - tension
+    // Tier 4: aggressive syncopated motif - chaos
+    const SCALES: Record<number, number[]> = {
+      1: [293.66, 349.23, 392.0, 440.0, 392.0, 349.23, 293.66, 523.25],
+      2: [349.23, 392.0, 440.0, 523.25, 587.33, 523.25, 440.0, 349.23],
+      3: [392.0, 440.0, 493.88, 523.25, 587.33, 659.25, 587.33, 523.25],
+      4: [440.0, 523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 880.0],
+    };
+    const notes = SCALES[newTier];
     let noteIndex = 0;
+    let _subBeatIndex = 0; // for 16th-note hi-hat in tiers 3-4
 
     const playBeat = (ctx: AudioContext) => {
-      // Abort if this session has been superseded or music was stopped
       if (!this.bgPlaying || session !== this.bgSession) return;
-      // Abort if context is no longer running (e.g. suspended by stopBackgroundMusic)
-      if (ctx.state !== "running") return;
 
       const now = ctx.currentTime;
-      const master = this.getMaster();
-      if (!master) return;
+      const music = this.musicGain;
+      if (!music) return;
 
-      // --- Melody: square wave ---
-      const melodyOsc = ctx.createOscillator();
-      const melodyGain = ctx.createGain();
-      melodyOsc.type = "square";
-      melodyOsc.frequency.value = notes[noteIndex % notes.length];
-      melodyGain.gain.setValueAtTime(0.08, now);
-      melodyGain.gain.exponentialRampToValueAtTime(
-        0.001,
-        now + (BEAT_MS / 1000) * 0.9,
-      );
-      melodyOsc.connect(melodyGain);
-      melodyGain.connect(master);
-      melodyOsc.start(now);
-      melodyOsc.stop(now + BEAT_MS / 1000);
+      const beatSec = BEAT_MS / 1000;
+      const ni = noteIndex % notes.length;
 
-      // --- Bass: triangle wave (octave down) ---
-      const bassOsc = ctx.createOscillator();
-      const bassGain = ctx.createGain();
-      bassOsc.type = "triangle";
-      bassOsc.frequency.value = notes[noteIndex % notes.length] / 2;
-      bassGain.gain.setValueAtTime(0.12, now);
-      bassGain.gain.exponentialRampToValueAtTime(
-        0.001,
-        now + (BEAT_MS / 1000) * 0.8,
-      );
-      bassOsc.connect(bassGain);
-      bassGain.connect(master);
-      bassOsc.start(now);
-      bassOsc.stop(now + BEAT_MS / 1000);
-
-      // --- Kick: every 2 beats ---
-      if (noteIndex % 2 === 0) {
-        const kickOsc = ctx.createOscillator();
-        const kickGain = ctx.createGain();
-        kickOsc.type = "sine";
-        kickOsc.frequency.setValueAtTime(300, now);
-        kickOsc.frequency.exponentialRampToValueAtTime(60, now + 0.1);
-        kickGain.gain.setValueAtTime(0.4, now);
-        kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-        kickOsc.connect(kickGain);
-        kickGain.connect(master);
-        kickOsc.start(now);
-        kickOsc.stop(now + 0.2);
+      // ── MELODY: square wave (all tiers) ────────────────────────────────────
+      {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        // Tier 4: add slight detune for gritty feel
+        osc.type = "square";
+        osc.frequency.value = notes[ni];
+        if (newTier >= 3) osc.detune.value = (Math.random() - 0.5) * 8;
+        const melVol =
+          newTier === 1
+            ? 0.07
+            : newTier === 2
+              ? 0.09
+              : newTier === 3
+                ? 0.1
+                : 0.11;
+        gain.gain.setValueAtTime(melVol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + beatSec * 0.85);
+        osc.connect(gain);
+        gain.connect(music);
+        osc.start(now);
+        osc.stop(now + beatSec);
       }
 
-      // --- Hi-hat: every beat ---
+      // ── BASS: triangle (all tiers, gets deeper in t3-t4) ───────────────────
       {
-        const bufferSize = ctx.sampleRate * 0.05;
-        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          data[i] = Math.random() * 2 - 1;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = notes[ni] / 2;
+        const bassVol = newTier <= 2 ? 0.13 : 0.16;
+        gain.gain.setValueAtTime(bassVol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + beatSec * 0.75);
+        osc.connect(gain);
+        gain.connect(music);
+        osc.start(now);
+        osc.stop(now + beatSec);
+      }
+
+      // ── SUB-BASS: sine an octave lower (tiers 3-4 only) ────────────────────
+      if (newTier >= 3 && noteIndex % 4 === 0) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = notes[ni] / 4;
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + beatSec * 1.8);
+        osc.connect(gain);
+        gain.connect(music);
+        osc.start(now);
+        osc.stop(now + beatSec * 2);
+      }
+
+      // ── KICK DRUM (all tiers, more frequent in t3-t4) ──────────────────────
+      const kickBeats = newTier <= 2 ? 2 : 1; // every beat in t3-t4
+      if (noteIndex % kickBeats === 0) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        const kickFreqStart = newTier >= 3 ? 180 : 220;
+        const kickFreqEnd = newTier >= 3 ? 40 : 55;
+        osc.frequency.setValueAtTime(kickFreqStart, now);
+        osc.frequency.exponentialRampToValueAtTime(kickFreqEnd, now + 0.12);
+        const kickVol = newTier <= 2 ? 0.35 : 0.45;
+        gain.gain.setValueAtTime(kickVol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        osc.connect(gain);
+        gain.connect(music);
+        osc.start(now);
+        osc.stop(now + 0.22);
+
+        // Kick click layer (tiers 3-4)
+        if (newTier >= 3) {
+          const clickOsc = ctx.createOscillator();
+          const clickGain = ctx.createGain();
+          clickOsc.type = "square";
+          clickOsc.frequency.value = 600;
+          clickGain.gain.setValueAtTime(0.12, now);
+          clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+          clickOsc.connect(clickGain);
+          clickGain.connect(music);
+          clickOsc.start(now);
+          clickOsc.stop(now + 0.03);
         }
-        const noiseSource = ctx.createBufferSource();
-        noiseSource.buffer = buffer;
-        const hihatFilter = ctx.createBiquadFilter();
-        hihatFilter.type = "highpass";
-        hihatFilter.frequency.value = 7000;
-        const hihatGain = ctx.createGain();
-        hihatGain.gain.setValueAtTime(0.06, now);
-        hihatGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-        noiseSource.connect(hihatFilter);
-        hihatFilter.connect(hihatGain);
-        hihatGain.connect(master);
-        noiseSource.start(now);
-        noiseSource.stop(now + 0.06);
+      }
+
+      // ── SNARE on beats 2 & 4 (tiers 2-4) ──────────────────────────────────
+      if (newTier >= 2 && noteIndex % 4 === 2) {
+        const bufSize = ctx.sampleRate * 0.08;
+        const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const filt = ctx.createBiquadFilter();
+        filt.type = "bandpass";
+        filt.frequency.value = 2000;
+        filt.Q.value = 0.8;
+        const gain = ctx.createGain();
+        const snareVol = newTier === 2 ? 0.12 : newTier === 3 ? 0.16 : 0.2;
+        gain.gain.setValueAtTime(snareVol, now + beatSec * 0.5);
+        gain.gain.exponentialRampToValueAtTime(
+          0.001,
+          now + beatSec * 0.5 + 0.1,
+        );
+        src.connect(filt);
+        filt.connect(gain);
+        gain.connect(music);
+        src.start(now + beatSec * 0.5);
+        src.stop(now + beatSec * 0.5 + 0.12);
+      }
+
+      // ── HI-HAT: every beat (t1-t2) or 16th notes (t3-t4) ──────────────────
+      const hatsPerBeat = newTier >= 3 ? 2 : 1;
+      for (let h = 0; h < hatsPerBeat; h++) {
+        const hatOffset = (h / hatsPerBeat) * beatSec;
+        const bufSize = ctx.sampleRate * 0.04;
+        const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const filt = ctx.createBiquadFilter();
+        filt.type = "highpass";
+        filt.frequency.value = newTier >= 3 ? 9000 : 7000;
+        const gain = ctx.createGain();
+        const hatVol =
+          newTier === 1
+            ? 0.05
+            : newTier === 2
+              ? 0.065
+              : newTier === 3
+                ? 0.075
+                : 0.08;
+        gain.gain.setValueAtTime(hatVol, now + hatOffset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + hatOffset + 0.04);
+        src.connect(filt);
+        filt.connect(gain);
+        gain.connect(music);
+        src.start(now + hatOffset);
+        src.stop(now + hatOffset + 0.05);
+      }
+      _subBeatIndex++;
+
+      // ── SYNTH PAD background (tiers 2-4) ───────────────────────────────────
+      // Plays every 4 beats on the root note for an atmospheric wash
+      if (newTier >= 2 && noteIndex % 4 === 0) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.value = notes[0] * (newTier >= 4 ? 1.5 : 1);
+        osc.detune.value = 7; // slight chorus effect
+        const filt = ctx.createBiquadFilter();
+        filt.type = "lowpass";
+        filt.frequency.value = newTier >= 4 ? 2000 : 1200;
+        const padVol = newTier === 2 ? 0.025 : newTier === 3 ? 0.035 : 0.045;
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(padVol, now + beatSec * 0.5);
+        gain.gain.linearRampToValueAtTime(0, now + beatSec * 3.5);
+        osc.connect(filt);
+        filt.connect(gain);
+        gain.connect(music);
+        osc.start(now);
+        osc.stop(now + beatSec * 4);
+      }
+
+      // ── ARPEGGIO COUNTER-MELODY (tiers 3-4) ────────────────────────────────
+      // Quick ascending run every 8 beats
+      if (newTier >= 3 && noteIndex % 8 === 0) {
+        const arpNotes = [notes[0], notes[1], notes[2], notes[3], notes[4]];
+        arpNotes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const t0 = now + idx * (beatSec / 4);
+          osc.type = newTier === 4 ? "square" : "triangle";
+          osc.frequency.value = freq * (newTier === 4 ? 2 : 1.5);
+          const arpVol = newTier === 3 ? 0.045 : 0.055;
+          gain.gain.setValueAtTime(arpVol, t0);
+          gain.gain.exponentialRampToValueAtTime(0.001, t0 + beatSec * 0.22);
+          osc.connect(gain);
+          gain.connect(music);
+          osc.start(t0);
+          osc.stop(t0 + beatSec * 0.25);
+        });
+      }
+
+      // ── CHAOS LAYER: short noise burst on off-beats (tier 4 only) ──────────
+      if (newTier === 4 && noteIndex % 3 === 1) {
+        const bufSize = ctx.sampleRate * 0.03;
+        const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * 0.6;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const filt = ctx.createBiquadFilter();
+        filt.type = "bandpass";
+        filt.frequency.value = 3500 + Math.random() * 1500;
+        filt.Q.value = 4;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.04, now + beatSec * 0.75);
+        gain.gain.exponentialRampToValueAtTime(
+          0.001,
+          now + beatSec * 0.75 + 0.04,
+        );
+        src.connect(filt);
+        filt.connect(gain);
+        gain.connect(music);
+        src.start(now + beatSec * 0.75);
+        src.stop(now + beatSec * 0.75 + 0.05);
       }
 
       noteIndex++;
     };
 
-    // Resume context first, then start the beat loop
     this.getCtxAsync().then((ctx) => {
-      // Double-check: if stop was called between the async gap, abort
       if (!this.bgPlaying || session !== this.bgSession) return;
+
+      if (this.musicGain) {
+        this.musicGain.gain.cancelScheduledValues(ctx.currentTime);
+        this.musicGain.gain.value = 1;
+      }
 
       playBeat(ctx);
       this.bgInterval = setInterval(() => playBeat(ctx), BEAT_MS);
     });
   }
 
-  stopBackgroundMusic(): void {
-    // Invalidate the current session so any pending async start aborts
+  private _stopBgInternal(): void {
     this.bgSession++;
     this.bgPlaying = false;
-
     if (this.bgInterval !== null) {
       clearInterval(this.bgInterval);
       this.bgInterval = null;
     }
+    if (this.musicGain && this.ctx) {
+      this.musicGain.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.musicGain.gain.setValueAtTime(0, this.ctx.currentTime);
+    }
+  }
 
-    // Suspend the AudioContext so no scheduled nodes produce sound
-    if (this.ctx && this.ctx.state === "running") {
-      this.ctx.suspend();
+  stopBackgroundMusic(): void {
+    this._stopBgInternal();
+  }
+
+  /**
+   * Update music tier when level changes.
+   * Call this from the game loop whenever level advances.
+   */
+  updateMusicForLevel(level: number): void {
+    const newTier = getMusicTier(level);
+    if (this.bgPlaying && this.currentTier !== newTier) {
+      // Restart with new tier
+      this.bgPlaying = false; // trick startBackgroundMusic into restarting
+      this.startBackgroundMusic(level);
     }
   }
 
   /**
-   * Meteor hit sound
-   * White noise burst + low freq sine + metallic click
+   * Meteor hit sound - White noise burst + low freq sine + metallic click
    */
   playHitSound(): void {
     this.getCtxAsync().then((ctx) => {
@@ -239,9 +444,7 @@ export class AudioEngine {
       const bufferSize = ctx.sampleRate * 0.1;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
       const noiseSource = ctx.createBufferSource();
       noiseSource.buffer = buffer;
       const noiseGain = ctx.createGain();
@@ -308,7 +511,6 @@ export class AudioEngine {
     this.getCtxAsync().then((ctx) => {
       const master = this.getMaster();
       if (!master) return;
-      // D4, F4, G4, A4, C5
       const arpNotes = [293.66, 349.23, 392, 440, 523.25];
       const noteLen = 0.08;
 
@@ -332,7 +534,7 @@ export class AudioEngine {
   }
 
   /**
-   * Power-up pickup sound - bright ascending chime (distinct from level-up)
+   * Power-up pickup sound - bright ascending chime
    */
   playPickupSound(type: "heart" | "coin"): void {
     this.getCtxAsync().then((ctx) => {
@@ -341,9 +543,8 @@ export class AudioEngine {
       const now = ctx.currentTime;
 
       if (type === "heart") {
-        // Heart: warm two-note chime going up
-        const notes = [523.25, 783.99]; // C5, G5
-        notes.forEach((freq, i) => {
+        const heartNotes = [523.25, 783.99];
+        heartNotes.forEach((freq, i) => {
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           const t0 = now + i * 0.1;
@@ -357,7 +558,7 @@ export class AudioEngine {
           osc.stop(t0 + 0.2);
         });
       } else {
-        // Coin: short bright blip + shimmer
+        // Coin: bright blip
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = "square";
