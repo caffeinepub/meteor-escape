@@ -97,6 +97,7 @@ export function GameScreen({
   const powerUpSpawnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const countdownTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isPausedRef = useRef(false);
   const gameActiveRef = useRef(true);
   const powerUpsRef = useRef<PowerUp[]>([]);
@@ -585,6 +586,10 @@ export function GameScreen({
   const startCountdownAndGame = useCallback(() => {
     setCountdown(3);
 
+    // Clear any existing countdown timers
+    for (const t of countdownTimersRef.current) clearTimeout(t);
+    countdownTimersRef.current = [];
+
     const steps: { value: CountdownValue; delay: number }[] = [
       { value: 3, delay: 0 },
       { value: 2, delay: 1000 },
@@ -594,15 +599,17 @@ export function GameScreen({
     ];
 
     for (const step of steps) {
-      setTimeout(() => {
+      const tid = setTimeout(() => {
+        if (!gameActiveRef.current) return;
         setCountdown(step.value);
-        if (step.value === null && gameActiveRef.current) {
+        if (step.value === null) {
           getAudioEngine().startBackgroundMusic();
           gameLoopRef.current();
           scheduleSpawnRef.current();
           schedulePowerUpSpawnRef.current();
         }
       }, step.delay);
+      countdownTimersRef.current.push(tid);
     }
   }, []);
 
@@ -631,6 +638,10 @@ export function GameScreen({
     return () => {
       gameActiveRef.current = false;
       window.removeEventListener("resize", handleResize);
+
+      // Clear all countdown timers so music never starts after unmount
+      for (const t of countdownTimersRef.current) clearTimeout(t);
+      countdownTimersRef.current = [];
 
       if (animFrameRef.current !== null) {
         cancelAnimationFrame(animFrameRef.current);
@@ -748,30 +759,8 @@ export function GameScreen({
     livesRef.current = MAX_LIVES;
     setLives(MAX_LIVES);
 
-    // Countdown before resuming
-    setCountdown(3);
-    const steps: { value: CountdownValue; delay: number }[] = [
-      { value: 3, delay: 0 },
-      { value: 2, delay: 1000 },
-      { value: 1, delay: 2000 },
-      { value: "go", delay: 3000 },
-      { value: null, delay: 3700 },
-    ];
-
-    for (const step of steps) {
-      setTimeout(() => {
-        setCountdown(step.value);
-        if (step.value === null && gameActiveRef.current) {
-          if (animFrameRef.current !== null) {
-            cancelAnimationFrame(animFrameRef.current);
-          }
-          getAudioEngine().startBackgroundMusic();
-          gameLoopRef.current();
-          scheduleSpawnRef.current();
-          schedulePowerUpSpawnRef.current();
-        }
-      }, step.delay);
-    }
+    // Countdown before resuming -- use startCountdownAndGame to ensure timers are tracked
+    startCountdownAndGame();
   }
 
   // ===================== GAME OVER =====================
