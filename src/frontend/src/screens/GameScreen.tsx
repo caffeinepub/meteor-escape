@@ -138,12 +138,9 @@ export function GameScreen({
 
     // --- Local mutable state ---
     let active = true;
+    let gameRunning = false; // true only when countdown finished and game is active
     let paused = false;
     let animFrame: number | null = null;
-    let spawnTimerId: ReturnType<typeof setTimeout> | null = null;
-    let powerUpTimerId: ReturnType<typeof setTimeout> | null = null;
-    let invincibleTimerId: ReturnType<typeof setTimeout> | null = null;
-    let hitTimerId: ReturnType<typeof setTimeout> | null = null;
     const countdownTimers: ReturnType<typeof setTimeout>[] = [];
 
     let score = initialScore;
@@ -153,8 +150,17 @@ export function GameScreen({
     let powerUps: PowerUp[] = [];
     let isInvincible = false;
     let isHit = false;
-    let bodyCenter: BodyCenter | null = null;
+    let bodyCenter: BodyCenter = {
+      x: window.innerWidth / 2,
+      y: window.innerHeight * 0.55,
+    };
     let smoothedBody: BodyCenter | null = null;
+
+    // Spawn timing (tracked in gameLoop via timestamps)
+    let lastMeteorSpawnTime = 0;
+    let lastPowerUpSpawnTime = 0;
+    let invincibleTimer: ReturnType<typeof setTimeout> | null = null;
+    let hitTimer: ReturnType<typeof setTimeout> | null = null;
 
     let statsDodged = 0;
     let statsHits = 0;
@@ -170,16 +176,11 @@ export function GameScreen({
       if (!canvas) return;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      if (!bodyCenter) {
+      // Reset body center to middle on resize if MediaPipe not active
+      if (!smoothedBody) {
         bodyCenter = {
           x: window.innerWidth / 2,
           y: window.innerHeight * 0.55,
-        };
-      }
-      if (!touchBodyRef.current) {
-        touchBodyRef.current = {
-          x: window.innerWidth / 2,
-          y: window.innerHeight * 0.5,
         };
       }
     }
@@ -187,48 +188,9 @@ export function GameScreen({
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
-    // --- Spawn scheduling ---
-    function scheduleSpawn() {
-      if (spawnTimerId) {
-        clearTimeout(spawnTimerId);
-        spawnTimerId = null;
-      }
-      if (!active || paused) return;
-      const cfg = getLevelForScore(score);
-      spawnTimerId = setTimeout(() => {
-        if (!active || paused) return;
-        const canvas = canvasRef.current;
-        if (canvas && meteors.length < cfg.maxMeteors) {
-          meteors = [
-            ...meteors,
-            createMeteor(canvas.width, cfg.speedMin, cfg.speedMax),
-          ];
-        }
-        scheduleSpawn();
-      }, cfg.spawnMs);
-    }
-
-    function schedulePowerUpSpawn() {
-      if (powerUpTimerId) {
-        clearTimeout(powerUpTimerId);
-        powerUpTimerId = null;
-      }
-      if (!active || paused) return;
-      const interval = getPowerUpSpawnInterval(level);
-      powerUpTimerId = setTimeout(() => {
-        if (!active || paused) return;
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const type: "heart" | "coin" =
-            Math.random() < POWERUP_HEART_CHANCE ? "heart" : "coin";
-          powerUps = [...powerUps, createPowerUp(canvas.width, type)];
-        }
-        schedulePowerUpSpawn();
-      }, interval);
-    }
-
     // --- End-game helpers ---
     function triggerGameOver() {
+      gameRunning = false;
       active = false;
       if (animFrame !== null) {
         cancelAnimationFrame(animFrame);
@@ -247,6 +209,7 @@ export function GameScreen({
     }
 
     function triggerLegend() {
+      gameRunning = false;
       active = false;
       if (animFrame !== null) {
         cancelAnimationFrame(animFrame);
@@ -260,6 +223,7 @@ export function GameScreen({
     }
 
     function triggerLevelUp(newLevel: number, newScore: number) {
+      gameRunning = false;
       active = false;
       if (animFrame !== null) {
         cancelAnimationFrame(animFrame);
@@ -274,8 +238,8 @@ export function GameScreen({
       setShowLevelUp(true);
     }
 
-    // --- Game loop ---
-    function gameLoop() {
+    // --- Game loop (handles spawning internally via timestamps) ---
+    function gameLoop(timestamp: number) {
       if (!active) return;
 
       const canvas = canvasRef.current;
@@ -286,24 +250,43 @@ export function GameScreen({
       }
 
       const center = touchModeRef.current
-        ? (touchBodyRef.current ?? {
-            x: canvas.width / 2,
-            y: canvas.height * 0.55,
-          })
-        : (bodyCenter ?? {
-            x: canvas.width / 2,
-            y: canvas.height * 0.55,
-          });
+        ? (touchBodyRef.current ?? bodyCenter)
+        : bodyCenter;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (paused) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        // Draw badge even when paused
         drawPlayerBadge(ctx, center, playerNameRef.current, false, false);
         animFrame = requestAnimationFrame(gameLoop);
         return;
+      }
+
+      // --- Spawning (time-based, inside game loop) ---
+      if (gameRunning) {
+        const cfg = getLevelForScore(score);
+
+        // Meteor spawn
+        if (
+          timestamp - lastMeteorSpawnTime >= cfg.spawnMs &&
+          meteors.length < cfg.maxMeteors
+        ) {
+          meteors = [
+            ...meteors,
+            createMeteor(canvas.width, cfg.speedMin, cfg.speedMax),
+          ];
+          lastMeteorSpawnTime = timestamp;
+        }
+
+        // Power-up spawn
+        const puInterval = getPowerUpSpawnInterval(level);
+        if (timestamp - lastPowerUpSpawnTime >= puInterval) {
+          const type: "heart" | "coin" =
+            Math.random() < POWERUP_HEART_CHANCE ? "heart" : "coin";
+          powerUps = [...powerUps, createPowerUp(canvas.width, type)];
+          lastPowerUpSpawnTime = timestamp;
+        }
       }
 
       // Update meteors
@@ -385,13 +368,13 @@ export function GameScreen({
         isHit = true;
         getAudioEngine().playHitSound();
 
-        if (hitTimerId) clearTimeout(hitTimerId);
-        hitTimerId = setTimeout(() => {
+        if (hitTimer) clearTimeout(hitTimer);
+        hitTimer = setTimeout(() => {
           isHit = false;
         }, 300);
 
-        if (invincibleTimerId) clearTimeout(invincibleTimerId);
-        invincibleTimerId = setTimeout(() => {
+        if (invincibleTimer) clearTimeout(invincibleTimer);
+        invincibleTimer = setTimeout(() => {
           isInvincible = false;
           isHit = false;
         }, INVINCIBILITY_DURATION);
@@ -422,15 +405,16 @@ export function GameScreen({
       animFrame = requestAnimationFrame(gameLoop);
     }
 
-    // --- Start the game loop + spawners ---
+    // --- Start the game (called after countdown) ---
     function startGame() {
       if (!active) return;
+      gameRunning = true;
+      // Initialize spawn timestamps so first spawn is nearly immediate
+      lastMeteorSpawnTime = 0;
+      lastPowerUpSpawnTime = 0;
       getAudioEngine().startBackgroundMusic();
-      // Start game loop
+      // Start game loop -- timestamp param handled by rAF
       animFrame = requestAnimationFrame(gameLoop);
-      // Start spawners with a tiny stagger so first meteor appears quickly
-      scheduleSpawn();
-      schedulePowerUpSpawn();
     }
 
     // --- Countdown then start ---
@@ -463,14 +447,6 @@ export function GameScreen({
         setIsPaused(true);
         setShowPauseMenu(true);
         getAudioEngine().stopBackgroundMusic();
-        if (spawnTimerId) {
-          clearTimeout(spawnTimerId);
-          spawnTimerId = null;
-        }
-        if (powerUpTimerId) {
-          clearTimeout(powerUpTimerId);
-          powerUpTimerId = null;
-        }
       }
     };
 
@@ -481,8 +457,6 @@ export function GameScreen({
         setIsPaused(false);
         setShowPauseMenu(false);
         getAudioEngine().startBackgroundMusic();
-        scheduleSpawn();
-        schedulePowerUpSpawn();
       }
     };
 
@@ -490,6 +464,7 @@ export function GameScreen({
       active = true;
       paused = false;
       isPausedRef.current = false;
+      gameRunning = false;
       meteors = [];
       powerUps = [];
       lives = MAX_LIVES;
@@ -560,6 +535,7 @@ export function GameScreen({
                 SMOOTHING_ALPHA * rawY + (1 - SMOOTHING_ALPHA) * smoothedBody.y,
             };
           }
+          // bodyCenter always updated from MediaPipe results
           bodyCenter = smoothedBody;
         });
 
@@ -627,13 +603,18 @@ export function GameScreen({
     }
 
     // --- Boot ---
+    // Start countdown immediately (badge shows at default position)
+    // MediaPipe runs in parallel -- bodyCenter updates as soon as pose detected
+    setMediaPipeReady(false);
+    startCountdown();
     initMediaPipe().then(() => {
-      if (active) startCountdown();
+      if (active) setMediaPipeReady(true);
     });
 
     // --- Cleanup ---
     return () => {
       active = false;
+      gameRunning = false;
 
       // Neutralise the refs so stale calls are no-ops
       pauseFnRef.current = () => {};
@@ -642,10 +623,8 @@ export function GameScreen({
 
       for (const tid of countdownTimers) clearTimeout(tid);
       if (animFrame !== null) cancelAnimationFrame(animFrame);
-      if (spawnTimerId) clearTimeout(spawnTimerId);
-      if (powerUpTimerId) clearTimeout(powerUpTimerId);
-      if (invincibleTimerId) clearTimeout(invincibleTimerId);
-      if (hitTimerId) clearTimeout(hitTimerId);
+      if (invincibleTimer) clearTimeout(invincibleTimer);
+      if (hitTimer) clearTimeout(hitTimer);
 
       window.removeEventListener("resize", resizeCanvas);
 
@@ -809,7 +788,7 @@ export function GameScreen({
         </div>
       ))}
 
-      {/* MediaPipe loading */}
+      {/* MediaPipe loading indicator */}
       {!mediaPipeReady && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40">
           <div
