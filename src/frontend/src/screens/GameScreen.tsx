@@ -249,9 +249,21 @@ export function GameScreen({
         return;
       }
 
-      const center = touchModeRef.current
+      const rawCenter = touchModeRef.current
         ? (touchBodyRef.current ?? bodyCenter)
         : bodyCenter;
+      // Clamp center to canvas bounds so badge stays visible and cheating is prevented
+      const badgeMargin = 42;
+      const center = {
+        x: Math.max(
+          badgeMargin,
+          Math.min(canvas.width - badgeMargin, rawCenter.x),
+        ),
+        y: Math.max(
+          80 + badgeMargin,
+          Math.min(canvas.height - badgeMargin, rawCenter.y),
+        ),
+      };
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 

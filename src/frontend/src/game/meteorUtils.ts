@@ -413,8 +413,13 @@ export function drawPlayerBadge(
   isHit: boolean,
   isInvincible: boolean,
 ): void {
-  const { x, y } = bodyCenter;
-  const r = 52;
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  const r = 32;
+  // Clamp badge center so it never leaves canvas bounds
+  const margin = r * 1.3;
+  const x = Math.max(margin, Math.min(cw - margin, bodyCenter.x));
+  const y = Math.max(80 + margin, Math.min(ch - margin, bodyCenter.y));
 
   ctx.save();
 
@@ -539,7 +544,7 @@ export function drawPlayerBadge(
   const initial = playerName.charAt(0).toUpperCase() || "?";
   ctx.shadowBlur = 14;
   ctx.shadowColor = "rgba(255, 255, 255, 0.9)";
-  ctx.font = `bold 30px "Orbitron", "Sora", sans-serif`;
+  ctx.font = `bold 20px "Orbitron", "Sora", sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#FFFFFF";
